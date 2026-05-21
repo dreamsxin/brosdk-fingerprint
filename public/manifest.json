@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "BroSDK Fingerprint Guard",
+  "version": "0.1.0",
+  "description": "Behavior-aware browser fingerprint protection with semantic Canvas 2D perturbation.",
+  "minimum_chrome_version": "102",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+  "optional_permissions": [
+    "userScripts"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "match_about_blank": true,
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "BroSDK Fingerprint Guard",
+    "default_popup": "src/popup/index.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

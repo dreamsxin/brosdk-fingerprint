@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BroSDK Fingerprint Guard</title>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>BroSDK Fingerprint Guard</h1>
+        <span id="version"></span>
+      </header>
+
+      <section class="controls">
+        <button id="toggle-enabled" type="button">Loading</button>
+        <button id="toggle-whitelist" type="button">Whitelist</button>
+      </section>
+
+      <section class="status">
+        <div>Domain: <strong id="domain">-</strong></div>
+        <div>Canvas mode: <strong id="canvas-mode">-</strong></div>
+        <div>Stealth: <strong id="stealth">-</strong></div>
+      </section>
+
+      <section>
+        <h2>Activity</h2>
+        <div id="records" class="records">No records yet.</div>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
+

@@ -1,0 +1,16 @@
+{
+  "name": "brosdk-fingerprint",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite build --watch --mode development"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.308",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  }
+}
+
