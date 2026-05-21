@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WebGL ReadPixels Test</title>
+  </head>
+  <body>
+    <pre id="out"></pre>
+    <script>
+      const out = document.getElementById("out");
+      const hash = (data) => {
+        let h = 2166136261;
+        for (const value of data) {
+          h ^= value;
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 32;
+      canvas.height = 32;
+      const gl = canvas.getContext("webgl");
+      if (!gl) {
+        out.textContent = "webgl unsupported";
+      } else {
+        gl.clearColor(0.125, 0.25, 0.5, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        const pixels = new Uint8Array(32 * 32 * 4);
+        gl.readPixels(0, 0, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const debug = gl.getExtension("WEBGL_debug_renderer_info");
+        out.textContent = JSON.stringify({
+          hash: hash(pixels),
+          vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : undefined,
+          renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : undefined
+        }, null, 2);
+      }
+    </script>
+  </body>
+</html>
+

@@ -20,6 +20,16 @@ export type AudioConfig = {
   perturbAnalyser: boolean;
 };
 
+export type WebGLConfig = {
+  enabled: boolean;
+  mode: SeedMode;
+  spoofDebugInfo: boolean;
+  vendor: string;
+  renderer: string;
+  perturbReadPixels: boolean;
+  readPixelsNoiseScore: number;
+};
+
 export type StealthConfig = {
   enabled: boolean;
   recordNativeChecks: boolean;
@@ -32,6 +42,7 @@ export type ExtensionConfig = {
   seedText: string;
   canvas2d: Canvas2DConfig;
   audio: AudioConfig;
+  webgl: WebGLConfig;
   stealth: StealthConfig;
 };
 
@@ -65,6 +76,15 @@ export const DEFAULT_STORAGE: ExtensionStorage = {
       bufferNoiseScore: 80,
       perturbCompressor: true,
       perturbAnalyser: true
+    },
+    webgl: {
+      enabled: true,
+      mode: "domain",
+      spoofDebugInfo: false,
+      vendor: "Google Inc.",
+      renderer: "ANGLE (Generic GPU)",
+      perturbReadPixels: false,
+      readPixelsNoiseScore: 80
     },
     stealth: {
       enabled: true,

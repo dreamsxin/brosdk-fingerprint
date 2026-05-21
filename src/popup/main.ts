@@ -31,6 +31,7 @@ const makeProtectionViews = (): ProtectionView[] => {
   const globalEnabled = storage.config.enabled;
   const canvas = storage.config.canvas2d;
   const audio = storage.config.audio;
+  const webgl = storage.config.webgl;
   const stealth = storage.config.stealth;
 
   return [
@@ -74,9 +75,14 @@ const makeProtectionViews = (): ProtectionView[] => {
     },
     {
       name: "WebGL",
-      enabled: false,
-      implemented: false,
-      details: ["planned: metadata bucketization and risk-based readPixels noise"]
+      enabled: globalEnabled && webgl.enabled,
+      implemented: true,
+      mode: webgl.mode,
+      details: [
+        `seed: ${storage.config.seedText}`,
+        webgl.spoofDebugInfo ? "debug renderer spoof on" : "debug renderer record only",
+        webgl.perturbReadPixels ? `readPixels noise >= ${webgl.readPixelsNoiseScore}` : "readPixels noise off"
+      ]
     },
     {
       name: "WebGPU",

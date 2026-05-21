@@ -234,6 +234,23 @@ Export policy:
 - `50-99`: readback pixel perturbation for explicit `getImageData` calls; export pixel noise remains off by default.
 - `>= 100`: stronger readback perturbation for text, curve, and gradient regions; export pixel noise remains opt-in.
 
+### 6.5 BrowserScan and CreepJS Lessons
+
+The Canvas 2D implementation must avoid both instability and plugin-like noise signatures.
+
+Lessons from BrowserScan:
+
+- Do not derive output noise from mutable counters such as accumulated risk score.
+- Stable output must come from unified seed, domain/page mode, canvas dimensions, and stable semantic signatures.
+- Export-time pixel noise is easy to classify as anthropogenic plugin noise, so it remains off by default.
+
+Lessons from CreepJS:
+
+- CreepJS treats modified `measureText`, `TextMetrics`, `getImageData`, `fillText`, `strokeText`, and `toDataURL` prototypes as lie signals.
+- CreepJS checks blank 8x8 readback pixels and known 2x2 low-entropy image data; default readback pixel perturbation can trigger suspicious-pixel detection.
+- Default Canvas protection therefore does not hook `measureText`, does not proxy `TextMetrics`, and does not perturb `getImageData` pixels unless explicitly enabled.
+- The safer default is draw-time semantic perturbation for text and curve rendering, while keeping low-entropy readbacks clean.
+
 ## 7. Audio Design
 
 Audio protection should focus on offline fingerprint chains, not real playback.
@@ -295,6 +312,7 @@ Perturbation:
 - Hide or normalize selected high-entropy extensions only when safe.
 - Perturb `readPixels` only when risk is high.
 - Do not degrade visible render output unless readback occurs.
+- The default WebGL profile records high-risk access and leaves metadata spoofing/readback perturbation off unless explicitly enabled.
 
 ## 9. WebGPU Design
 

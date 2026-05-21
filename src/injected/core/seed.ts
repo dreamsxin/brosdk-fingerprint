@@ -27,3 +27,7 @@ export const resolveCanvasSeed = (storage: ExtensionStorage): number => {
 export const resolveAudioSeed = (storage: ExtensionStorage): number => {
   return resolveSeed(storage, storage.config.audio.mode);
 };
+
+export const resolveWebGLSeed = (storage: ExtensionStorage): number => {
+  return resolveSeed(storage, storage.config.webgl.mode);
+};

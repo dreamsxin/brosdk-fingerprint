@@ -189,6 +189,7 @@ Acceptance:
 - Text fingerprint output changes and remains stable by selected seed mode.
 - Gradient and curve fingerprint output changes.
 - CreepJS or similar Canvas score changes when enabled.
+- CreepJS should not mark Canvas 2D as blocked due to `measureText`, `TextMetrics`, blank readback, or known low-entropy image-data probes in the default profile.
 - Normal canvas chart/demo remains visually intact.
 
 ## 6. Phase 4: Audio Risk-Based Protection
@@ -250,12 +251,14 @@ Tasks:
 - Normalize `WEBGL_debug_renderer_info`.
 - Bucketize selected limits and precision values.
 - Perturb `readPixels` only when risk threshold is met.
+- Default WebGL MVP should record metadata/readback access first; spoofing and readback perturbation are opt-in to avoid visible rendering regressions.
 
 Acceptance:
 
 - GPU vendor/renderer can be configured or bucketized.
 - Visible WebGL render demos remain visually correct.
 - Readback-based fingerprint tests change.
+- Default profile does not modify `readPixels` output.
 - Metadata values remain plausible and internally consistent.
 
 ## 8. Phase 6: WebGPU Protection

@@ -2,6 +2,7 @@ import type { ExtensionStorage } from "../shared/config";
 import { installStealth } from "./core/stealth";
 import { installAudio } from "./modules/audio";
 import { installCanvas2D } from "./modules/canvas2d";
+import { installWebGL } from "./modules/webgl";
 
 const defaultStorage: ExtensionStorage = {
   version: 1,
@@ -27,6 +28,15 @@ const defaultStorage: ExtensionStorage = {
       bufferNoiseScore: 80,
       perturbCompressor: true,
       perturbAnalyser: true
+    },
+    webgl: {
+      enabled: true,
+      mode: "domain",
+      spoofDebugInfo: false,
+      vendor: "Google Inc.",
+      renderer: "ANGLE (Generic GPU)",
+      perturbReadPixels: false,
+      readPixelsNoiseScore: 80
     },
     stealth: {
       enabled: true,
@@ -73,4 +83,5 @@ if (storage?.config.enabled) {
   }
   installCanvas2D(storage);
   installAudio(storage);
+  installWebGL(storage);
 }
