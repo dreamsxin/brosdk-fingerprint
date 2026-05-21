@@ -173,7 +173,7 @@ Tasks:
   - transforms
   - shadow/filter/composite
 - Implement parameter perturbation for high-risk drawing.
-- Implement consistent `measureText` perturbation.
+- Keep `measureText` unmodified by default; rely on `fillText` and `strokeText` perturbation for text rendering protection.
 - Implement local export-time pixel perturbation for high-risk profiles as an opt-in mode.
 - Keep export-time pixel perturbation disabled by default; prefer drawing-parameter perturbation to reduce anthropogenic-noise detection.
 - Hook:

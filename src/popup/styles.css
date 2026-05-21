@@ -44,6 +44,17 @@ button {
   cursor: pointer;
 }
 
+input {
+  min-width: 0;
+  border: 1px solid #d0d5dd;
+  background: #ffffff;
+  color: #101828;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+}
+
 button.primary {
   background: #155eef;
   color: #ffffff;
@@ -68,6 +79,16 @@ button.warning {
   margin-top: 12px;
   font-size: 12px;
   color: #475467;
+}
+
+.seed-panel {
+  margin-top: 12px;
+}
+
+.seed-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
 }
 
 .records {
@@ -177,6 +198,7 @@ button.warning {
   }
 
   button,
+  input,
   .record,
   .protection {
     background: #1f2937;

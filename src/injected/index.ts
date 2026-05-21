@@ -9,6 +9,7 @@ const defaultStorage: ExtensionStorage = {
     enabled: true,
     browserSeed: 0,
     globalSeed: 311415926,
+    seedText: "default",
     canvas2d: {
       enabled: true,
       mode: "domain",
@@ -17,7 +18,7 @@ const defaultStorage: ExtensionStorage = {
       perturbCurves: true,
       perturbGradients: true,
       perturbImages: false,
-      perturbReadback: true,
+      perturbReadback: false,
       perturbExportPixels: false
     },
     audio: {

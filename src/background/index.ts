@@ -1,5 +1,6 @@
 import { domainMatches, getHostname } from "../shared/domain";
 import type { BackgroundMessage, ContentToBackgroundMessage } from "../shared/messages";
+import { hashString } from "../shared/random";
 import { clearRecords, getRecords, pushRecord } from "./records";
 import { getStorage, initStorage, saveStorage } from "./storage";
 
@@ -49,6 +50,13 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage | ContentToBack
         storage.config.enabled = message.enabled;
         return await saveStorage(storage);
       }
+      case "config.setSeed": {
+        const storage = await getStorage();
+        const seedText = message.seedText.trim();
+        storage.config.seedText = seedText;
+        storage.config.globalSeed = seedText ? hashString(seedText) : 0;
+        return await saveStorage(storage);
+      }
       case "whitelist.toggle": {
         const storage = await getStorage();
         const hostname = message.hostname.trim().toLowerCase();
@@ -80,4 +88,3 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     await chrome.action.setBadgeBackgroundColor({ tabId, color: "#667085" });
   }
 });
-

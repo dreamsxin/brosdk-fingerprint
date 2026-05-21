@@ -29,6 +29,7 @@ export type ExtensionConfig = {
   enabled: boolean;
   browserSeed: number;
   globalSeed: number;
+  seedText: string;
   canvas2d: Canvas2DConfig;
   audio: AudioConfig;
   stealth: StealthConfig;
@@ -45,7 +46,8 @@ export const DEFAULT_STORAGE: ExtensionStorage = {
   config: {
     enabled: true,
     browserSeed: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
-    globalSeed: 311415926,
+    globalSeed: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
+    seedText: Math.random().toString(36).slice(2, 12),
     canvas2d: {
       enabled: true,
       mode: "domain",
@@ -54,7 +56,7 @@ export const DEFAULT_STORAGE: ExtensionStorage = {
       perturbCurves: true,
       perturbGradients: true,
       perturbImages: false,
-      perturbReadback: true,
+      perturbReadback: false,
       perturbExportPixels: false
     },
     audio: {

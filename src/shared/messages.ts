@@ -13,12 +13,14 @@ export type ContentToBackgroundMessage =
 export type BackgroundMessage =
   | { type: "storage.get" }
   | { type: "config.setEnabled"; enabled: boolean }
+  | { type: "config.setSeed"; seedText: string }
   | { type: "whitelist.toggle"; hostname: string }
   | { type: "records.get"; tabId: number };
 
 export type BackgroundResponseMap = {
   "storage.get": ExtensionStorage;
   "config.setEnabled": ExtensionStorage;
+  "config.setSeed": ExtensionStorage;
   "whitelist.toggle": ExtensionStorage;
   "records.get": FingerprintRecord[];
 };
@@ -30,4 +32,3 @@ export type PageRecordMessage = {
   key: string;
   level: "low" | "high";
 };
-

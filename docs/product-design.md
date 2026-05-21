@@ -144,6 +144,8 @@ Canvas 2D is the priority module.
 
 The module should track drawing semantics before perturbing output. Each canvas/context receives a profile.
 
+The default Canvas 2D strategy is low-interference semantic perturbation. It perturbs high-entropy drawing inputs such as text drawing coordinates, curves, non-axis-aligned lines, gradients, and optional image draws. It does not modify pure solid fills, integer axis-aligned lines, TextMetrics return objects, or export pixels by default.
+
 ```ts
 type Canvas2DProfile = {
   riskScore: number
@@ -176,7 +178,7 @@ These should not be perturbed by default:
 
 These should increase risk and may be perturbed:
 
-- `fillText`, `strokeText`, `measureText`.
+- `fillText`, `strokeText`; `measureText` is treated as sensitive but is not hooked by default.
 - `arc`, `arcTo`, `ellipse`, `bezierCurveTo`, `quadraticCurveTo`.
 - Non-axis-aligned lines.
 - Fractional coordinates.
@@ -198,7 +200,7 @@ Layer 1: parameter perturbation.
 Layer 2: text perturbation.
 
 - Apply stable tiny x/y offsets to `fillText` and `strokeText`.
-- Apply matching stable adjustments to `measureText`.
+- Do not hook or modify `measureText` by default; this avoids `TextMetrics` and native-function lie detections.
 - Do not modify text content.
 
 Layer 3: export-time pixel perturbation.

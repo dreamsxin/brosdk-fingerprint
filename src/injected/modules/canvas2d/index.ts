@@ -1,5 +1,4 @@
 import type { ExtensionStorage } from "../../../shared/config";
-import { stableNoise } from "../../core/random";
 import { record } from "../../core/record";
 import { nativeProxy, registerFunction } from "../../core/stealth";
 import { resolveCanvasSeed } from "../../core/seed";
@@ -235,25 +234,6 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       return Reflect.apply(target, thisArg, args);
     }
   }) as typeof proto.stroke;
-
-  const rawMeasureText = proto.measureText;
-  proto.measureText = nativeProxy(rawMeasureText, {
-    apply(target, thisArg, args: Parameters<CanvasRenderingContext2D["measureText"]>) {
-      const profile = getProfileForContext(thisArg);
-      profile.hasText = true;
-      addRisk(profile, 20, `measureText:${thisArg.font}:${String(args[0]).slice(0, 64)}`);
-      record("canvas2d.measureText", "high");
-      const metrics = Reflect.apply(target, thisArg, args);
-      if (!config.perturbText) return metrics;
-      const widthNoise = stableNoise(seed, `measure:${thisArg.font}:${args[0]}`, 0.018);
-      return new Proxy(metrics, {
-        get(targetMetrics, prop, receiver) {
-          if (prop === "width") return targetMetrics.width + widthNoise;
-          return Reflect.get(targetMetrics, prop, receiver);
-        }
-      });
-    }
-  }) as typeof proto.measureText;
 
   for (const key of ["fillText", "strokeText"] as const) {
     const raw = proto[key];

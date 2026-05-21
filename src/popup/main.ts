@@ -12,6 +12,12 @@ let activeTab: chrome.tabs.Tab | undefined;
 let hostname: string | undefined;
 let storage: BackgroundResponseMap["storage.get"] | undefined;
 
+const randomSeedText = () => {
+  const bytes = new Uint32Array(2);
+  crypto.getRandomValues(bytes);
+  return `${bytes[0].toString(36)}${bytes[1].toString(36)}`;
+};
+
 type ProtectionView = {
   name: string;
   enabled: boolean;
@@ -34,6 +40,7 @@ const makeProtectionViews = (): ProtectionView[] => {
       implemented: true,
       mode: canvas.mode,
       details: [
+        `seed: ${storage.config.seedText}`,
         `export noise score >= ${canvas.exportNoiseScore}`,
         canvas.perturbText ? "text on" : "text off",
         canvas.perturbCurves ? "curves on" : "curves off",
@@ -49,6 +56,7 @@ const makeProtectionViews = (): ProtectionView[] => {
       implemented: true,
       mode: audio.mode,
       details: [
+        `seed: ${storage.config.seedText}`,
         `offline buffer noise score >= ${audio.bufferNoiseScore}`,
         audio.perturbCompressor ? "compressor on" : "compressor off",
         audio.perturbAnalyser ? "analyser on" : "analyser off"
@@ -146,6 +154,7 @@ const render = () => {
   if (!storage) return;
   $("version").textContent = `v${chrome.runtime.getManifest().version}`;
   $("domain").textContent = hostname ?? "unsupported";
+  $<HTMLInputElement>("seed-input").value = storage.config.seedText;
   renderProtections();
 
   const enabledButton = $<HTMLButtonElement>("toggle-enabled");
@@ -168,6 +177,17 @@ $("toggle-enabled").addEventListener("click", async () => {
 $("toggle-whitelist").addEventListener("click", async () => {
   if (!hostname) return;
   storage = await send("whitelist.toggle", { hostname });
+  render();
+});
+
+$("random-seed").addEventListener("click", () => {
+  $<HTMLInputElement>("seed-input").value = randomSeedText();
+});
+
+$("save-seed").addEventListener("click", async () => {
+  if (!storage) return;
+  const seedText = $<HTMLInputElement>("seed-input").value.trim() || randomSeedText();
+  storage = await send("config.setSeed", { seedText });
   render();
 });
 
