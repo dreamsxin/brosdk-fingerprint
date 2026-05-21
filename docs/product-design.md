@@ -203,7 +203,8 @@ Layer 2: text perturbation.
 
 Layer 3: export-time pixel perturbation.
 
-- Only apply when the canvas risk score exceeds threshold.
+- Disabled by default to avoid plugin-like anthropogenic noise signatures.
+- Only apply when explicitly enabled and the canvas risk score exceeds threshold.
 - Prefer local regions around text, curves, gradients, and image draw areas.
 - Avoid perturbing pure solid fills and axis-aligned UI shapes.
 
@@ -228,8 +229,8 @@ Export policy:
 
 - `< 20`: no perturbation.
 - `20-49`: parameter-level perturbation only.
-- `50-99`: local light pixel perturbation.
-- `>= 100`: stronger local perturbation for text, curve, and gradient regions.
+- `50-99`: readback pixel perturbation for explicit `getImageData` calls; export pixel noise remains off by default.
+- `>= 100`: stronger readback perturbation for text, curve, and gradient regions; export pixel noise remains opt-in.
 
 ## 7. Audio Design
 
@@ -515,4 +516,3 @@ Success criteria:
 - Common visible graphics demos still render correctly.
 - Native-function checks do not trivially reveal hooks.
 - Whitelisted sites receive original API behavior.
-

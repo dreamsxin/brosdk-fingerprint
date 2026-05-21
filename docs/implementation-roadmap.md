@@ -174,7 +174,8 @@ Tasks:
   - shadow/filter/composite
 - Implement parameter perturbation for high-risk drawing.
 - Implement consistent `measureText` perturbation.
-- Implement local export-time pixel perturbation for high-risk profiles.
+- Implement local export-time pixel perturbation for high-risk profiles as an opt-in mode.
+- Keep export-time pixel perturbation disabled by default; prefer drawing-parameter perturbation to reduce anthropogenic-noise detection.
 - Hook:
   - `getImageData`
   - `toDataURL`
@@ -531,4 +532,3 @@ Milestone 8: Hardening.
 - External fingerprint sites.
 - Regression tests.
 - Compatibility review.
-

@@ -38,7 +38,9 @@ const makeProtectionViews = (): ProtectionView[] => {
         canvas.perturbText ? "text on" : "text off",
         canvas.perturbCurves ? "curves on" : "curves off",
         canvas.perturbGradients ? "gradients tracked" : "gradients off",
-        canvas.perturbImages ? "images on" : "images tracked only"
+        canvas.perturbImages ? "images on" : "images tracked only",
+        canvas.perturbReadback ? "readback pixels on" : "readback pixels off",
+        canvas.perturbExportPixels ? "export pixels on" : "export pixels off"
       ]
     },
     {

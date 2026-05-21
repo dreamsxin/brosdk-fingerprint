@@ -300,7 +300,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
         record("canvas2d.getImageData", profile.riskScore >= config.exportNoiseScore ? "high" : "low");
       }
       const imageData = Reflect.apply(target, thisArg, args);
-      if (profile.riskScore >= config.exportNoiseScore) {
+      if (config.perturbReadback && profile.riskScore >= config.exportNoiseScore) {
         return perturbImageData(imageData, profile, seed);
       }
       return imageData;
@@ -312,7 +312,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
     apply(target, thisArg, args) {
       const profile = getProfileForCanvas(thisArg);
       record("canvas2d.toDataURL", profile.riskScore >= config.exportNoiseScore ? "high" : "low");
-      if (profile.riskScore < config.exportNoiseScore) return Reflect.apply(target, thisArg, args);
+      if (!config.perturbExportPixels || profile.riskScore < config.exportNoiseScore) return Reflect.apply(target, thisArg, args);
       const ctx = thisArg.getContext("2d", { willReadFrequently: true });
       let original: ImageData | undefined;
       if (ctx) {
@@ -343,7 +343,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       const originalCallback = args[0];
       let ctx: CanvasRenderingContext2D | null = null;
       let original: ImageData | undefined;
-      if (profile.riskScore >= config.exportNoiseScore) {
+      if (config.perturbExportPixels && profile.riskScore >= config.exportNoiseScore) {
         ctx = thisArg.getContext("2d", { willReadFrequently: true });
         if (ctx) {
           let source: ImageData;

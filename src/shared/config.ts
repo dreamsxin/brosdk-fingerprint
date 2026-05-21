@@ -8,6 +8,8 @@ export type Canvas2DConfig = {
   perturbCurves: boolean;
   perturbGradients: boolean;
   perturbImages: boolean;
+  perturbReadback: boolean;
+  perturbExportPixels: boolean;
 };
 
 export type AudioConfig = {
@@ -51,7 +53,9 @@ export const DEFAULT_STORAGE: ExtensionStorage = {
       perturbText: true,
       perturbCurves: true,
       perturbGradients: true,
-      perturbImages: false
+      perturbImages: false,
+      perturbReadback: true,
+      perturbExportPixels: false
     },
     audio: {
       enabled: true,
