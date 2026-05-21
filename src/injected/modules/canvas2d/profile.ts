@@ -19,6 +19,7 @@ export type PathState = {
 
 export type Canvas2DProfile = {
   riskScore: number;
+  riskKeys: Set<string>;
   hasText: boolean;
   hasGradient: boolean;
   hasPattern: boolean;
@@ -46,6 +47,7 @@ export const createPathState = (): PathState => ({
 
 export const createProfile = (): Canvas2DProfile => ({
   riskScore: 0,
+  riskKeys: new Set(),
   hasText: false,
   hasGradient: false,
   hasPattern: false,
@@ -74,7 +76,14 @@ export const addRegion = (profile: Canvas2DProfile, region: RiskRegion) => {
   profile.regions.push(region);
 };
 
-export const addRisk = (profile: Canvas2DProfile, score: number) => {
-  profile.riskScore += score;
+export const addRisk = (profile: Canvas2DProfile, score: number, key?: string) => {
+  if (key) {
+    if (profile.riskKeys.has(key)) return;
+    profile.riskKeys.add(key);
+  }
+  profile.riskScore = Math.min(240, profile.riskScore + score);
 };
 
+export const riskSignature = (profile: Canvas2DProfile): string => {
+  return [...profile.riskKeys].sort().join("|");
+};

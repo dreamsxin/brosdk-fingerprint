@@ -1,5 +1,5 @@
 import { mulberry32, stableNoise } from "../../core/random";
-import type { Canvas2DProfile } from "./profile";
+import { riskSignature, type Canvas2DProfile } from "./profile";
 
 export const perturbNumber = (value: number, seed: number, salt: string, scale = 0.018): number => {
   if (!Number.isFinite(value)) return value;
@@ -10,7 +10,8 @@ export const perturbImageData = (imageData: ImageData, profile: Canvas2DProfile,
   const data = imageData.data;
   if (!data.length || profile.riskScore <= 0) return imageData;
 
-  const random = mulberry32(seed ^ profile.riskScore ^ imageData.width ^ imageData.height);
+  const signature = riskSignature(profile);
+  const random = mulberry32(seed ^ imageData.width ^ (imageData.height << 12) ^ signature.length);
   const stride = profile.riskScore >= 100 ? 47 : 89;
 
   for (let i = 0; i < data.length; i += 4 * stride) {

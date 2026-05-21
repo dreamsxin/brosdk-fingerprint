@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Canvas Stability Test</title>
+  </head>
+  <body>
+    <pre id="out"></pre>
+    <script>
+      const out = document.getElementById("out");
+      const hash = (value) => {
+        let h = 2166136261;
+        for (let i = 0; i < value.length; i++) {
+          h ^= value.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 260;
+      canvas.height = 100;
+      const ctx = canvas.getContext("2d");
+      const gradient = ctx.createLinearGradient(0, 0, 260, 0);
+      gradient.addColorStop(0, "#002244");
+      gradient.addColorStop(1, "#ddeeff");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 260, 100);
+      ctx.font = "22px Arial";
+      ctx.fillStyle = "#113399";
+      ctx.fillText("BrowserScan Stability", 12, 45);
+      ctx.beginPath();
+      ctx.moveTo(12, 85);
+      ctx.bezierCurveTo(70, 5, 155, 110, 240, 24);
+      ctx.stroke();
+
+      const first = hash(canvas.toDataURL());
+      const second = hash(canvas.toDataURL());
+      const third = hash(canvas.toDataURL());
+
+      out.textContent = JSON.stringify({
+        first,
+        second,
+        third,
+        stable: first === second && second === third
+      }, null, 2);
+    </script>
+  </body>
+</html>
+

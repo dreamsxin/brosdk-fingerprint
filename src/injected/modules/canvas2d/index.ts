@@ -9,6 +9,7 @@ import { perturbImageData, perturbNumber } from "./perturb";
 const profiles = new WeakMap<HTMLCanvasElement | OffscreenCanvas, Canvas2DProfile>();
 const contextProfiles = new WeakMap<CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, Canvas2DProfile>();
 const riskyStyles = new WeakSet<object>();
+let silentCanvasReadback = 0;
 
 const getProfileForCanvas = (canvas: HTMLCanvasElement | OffscreenCanvas): Canvas2DProfile => {
   let profile = profiles.get(canvas);
@@ -42,11 +43,11 @@ const hasRiskyPaintState = (ctx: CanvasRenderingContext2D | OffscreenCanvasRende
 const markPaintState = (profile: Canvas2DProfile, ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
   if (ctx.shadowBlur !== 0 || ctx.filter !== "none") {
     profile.hasShadow = true;
-    addRisk(profile, 15);
+    addRisk(profile, 15, "paint.shadow");
   }
   if (ctx.globalAlpha !== 1 || ctx.globalCompositeOperation !== "source-over") {
     profile.hasComposite = true;
-    addRisk(profile, 15);
+    addRisk(profile, 15, "paint.composite");
   }
 };
 
@@ -83,7 +84,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       riskyStyles.add(result);
       const profile = getProfileForContext(thisArg);
       profile.hasGradient = true;
-      addRisk(profile, 25);
+      addRisk(profile, 25, "gradient.linear");
       record("canvas2d.gradient", "high");
       return result;
     }
@@ -96,7 +97,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       riskyStyles.add(result);
       const profile = getProfileForContext(thisArg);
       profile.hasGradient = true;
-      addRisk(profile, 25);
+      addRisk(profile, 25, "gradient.radial");
       record("canvas2d.gradient", "high");
       return result;
     }
@@ -109,7 +110,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       if (result) riskyStyles.add(result);
       const profile = getProfileForContext(thisArg);
       profile.hasPattern = true;
-      addRisk(profile, 25);
+      addRisk(profile, 25, "pattern");
       record("canvas2d.pattern", "high");
       return result;
     }
@@ -122,7 +123,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       markPaintState(profile, thisArg);
       if (!isPureColor(thisArg.fillStyle) || riskyStyles.has(thisArg.fillStyle)) {
         profile.hasOnlySolidFill = false;
-        addRisk(profile, 25);
+        addRisk(profile, 25, "fill.risky");
         record("canvas2d.fill.risky", "high");
       } else if (hasRiskyPaintState(thisArg)) {
         profile.hasOnlySolidFill = false;
@@ -163,7 +164,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
           path.hasNonAxisLine = true;
           path.hasAxisAlignedOnly = false;
           profile.hasOnlyAxisAlignedLines = false;
-          addRisk(profile, 10);
+          addRisk(profile, 10, "line.non-axis");
           record("canvas2d.line.non-axis", "low");
           if (config.perturbCurves) {
             args[0] = perturbNumber(args[0], seed, `line:x:${args[0]}:${args[1]}`, 0.01);
@@ -186,7 +187,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
         profile.hasCurve = true;
         profile.hasAntialiasShape = true;
         profile.path.hasCurve = true;
-        addRisk(profile, 25);
+        addRisk(profile, 25, `curve.${key}`);
         record(`canvas2d.${key}`, "high");
         if (config.perturbCurves) {
           for (let i = 0; i < args.length; i++) {
@@ -206,7 +207,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       const profile = getProfileForContext(thisArg);
       markPaintState(profile, thisArg);
       if (riskyStyles.has(thisArg.fillStyle) || profile.path.hasCurve) {
-        addRisk(profile, profile.path.hasCurve ? 25 : 15);
+        addRisk(profile, profile.path.hasCurve ? 25 : 15, profile.path.hasCurve ? "path.fill.curve" : "path.fill.style");
         record("canvas2d.path.fill", "high");
       }
       if (Number.isFinite(profile.path.minX)) {
@@ -228,7 +229,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       const profile = getProfileForContext(thisArg);
       markPaintState(profile, thisArg);
       if (riskyStyles.has(thisArg.strokeStyle) || profile.path.hasCurve || profile.path.hasNonAxisLine) {
-        addRisk(profile, profile.path.hasCurve ? 25 : 10);
+        addRisk(profile, profile.path.hasCurve ? 25 : 10, profile.path.hasCurve ? "path.stroke.curve" : "path.stroke.line");
         record("canvas2d.path.stroke", profile.path.hasCurve ? "high" : "low");
       }
       return Reflect.apply(target, thisArg, args);
@@ -240,7 +241,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
     apply(target, thisArg, args: Parameters<CanvasRenderingContext2D["measureText"]>) {
       const profile = getProfileForContext(thisArg);
       profile.hasText = true;
-      addRisk(profile, 20);
+      addRisk(profile, 20, `measureText:${thisArg.font}:${String(args[0]).slice(0, 64)}`);
       record("canvas2d.measureText", "high");
       const metrics = Reflect.apply(target, thisArg, args);
       if (!config.perturbText) return metrics;
@@ -260,7 +261,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       apply(target, thisArg, args) {
         const profile = getProfileForContext(thisArg);
         profile.hasText = true;
-        addRisk(profile, 40);
+        addRisk(profile, 40, `${key}:${thisArg.font}:${String(args[0]).slice(0, 64)}`);
         record(`canvas2d.${key}`, "high");
         addRegion(profile, {
           x: Number(args[1]) || 0,
@@ -280,7 +281,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
     apply(target, thisArg, args) {
       const profile = getProfileForContext(thisArg);
       profile.hasImage = true;
-      addRisk(profile, 20);
+      addRisk(profile, 20, "drawImage");
       record("canvas2d.drawImage", config.perturbImages ? "high" : "low");
       if (config.perturbImages && typeof args[1] === "number" && typeof args[2] === "number") {
         args[1] = perturbNumber(args[1], seed, `drawImage:x:${args[1]}:${args[2]}`, 0.01);
@@ -295,7 +296,9 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
   proto.getImageData = nativeProxy(rawGetImageData, {
     apply(target, thisArg, args) {
       const profile = getProfileForContext(thisArg);
-      record("canvas2d.getImageData", profile.riskScore >= config.exportNoiseScore ? "high" : "low");
+      if (!silentCanvasReadback) {
+        record("canvas2d.getImageData", profile.riskScore >= config.exportNoiseScore ? "high" : "low");
+      }
       const imageData = Reflect.apply(target, thisArg, args);
       if (profile.riskScore >= config.exportNoiseScore) {
         return perturbImageData(imageData, profile, seed);
@@ -313,7 +316,13 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       const ctx = thisArg.getContext("2d", { willReadFrequently: true });
       let original: ImageData | undefined;
       if (ctx) {
-        const source = Reflect.apply(rawGetImageData, ctx, [0, 0, thisArg.width, thisArg.height]) as ImageData;
+        let source: ImageData;
+        try {
+          silentCanvasReadback++;
+          source = Reflect.apply(rawGetImageData, ctx, [0, 0, thisArg.width, thisArg.height]) as ImageData;
+        } finally {
+          silentCanvasReadback--;
+        }
         original = source;
         const perturbed = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
         Reflect.apply(rawPutImageData, ctx, [perturbImageData(perturbed, profile, seed), 0, 0]);
@@ -337,7 +346,13 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
       if (profile.riskScore >= config.exportNoiseScore) {
         ctx = thisArg.getContext("2d", { willReadFrequently: true });
         if (ctx) {
-          const source = Reflect.apply(rawGetImageData, ctx, [0, 0, thisArg.width, thisArg.height]) as ImageData;
+          let source: ImageData;
+          try {
+            silentCanvasReadback++;
+            source = Reflect.apply(rawGetImageData, ctx, [0, 0, thisArg.width, thisArg.height]) as ImageData;
+          } finally {
+            silentCanvasReadback--;
+          }
           original = source;
           const perturbed = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
           Reflect.apply(rawPutImageData, ctx, [perturbImageData(perturbed, profile, seed), 0, 0]);
