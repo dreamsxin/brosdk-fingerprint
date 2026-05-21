@@ -77,6 +77,44 @@ button.warning {
   overflow: auto;
 }
 
+.protections {
+  display: grid;
+  gap: 8px;
+}
+
+.protection {
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.protection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.protection-title {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.protection-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.protection-desc {
+  margin-top: 7px;
+  color: #475467;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .record {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -106,6 +144,26 @@ button.warning {
   color: #b42318;
 }
 
+.tag.on {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.tag.off {
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.tag.planned {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.tag.mode {
+  background: #eef4ff;
+  color: #3538cd;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     background: #111827;
@@ -113,12 +171,14 @@ button.warning {
   }
 
   header,
-  .record {
+  .record,
+  .protection {
     border-color: #374151;
   }
 
   button,
-  .record {
+  .record,
+  .protection {
     background: #1f2937;
     color: #f9fafb;
   }
@@ -126,5 +186,8 @@ button.warning {
   .status {
     color: #d1d5db;
   }
-}
 
+  .protection-desc {
+    color: #d1d5db;
+  }
+}

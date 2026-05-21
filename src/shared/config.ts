@@ -10,6 +10,14 @@ export type Canvas2DConfig = {
   perturbImages: boolean;
 };
 
+export type AudioConfig = {
+  enabled: boolean;
+  mode: SeedMode;
+  bufferNoiseScore: number;
+  perturbCompressor: boolean;
+  perturbAnalyser: boolean;
+};
+
 export type StealthConfig = {
   enabled: boolean;
   recordNativeChecks: boolean;
@@ -20,6 +28,7 @@ export type ExtensionConfig = {
   browserSeed: number;
   globalSeed: number;
   canvas2d: Canvas2DConfig;
+  audio: AudioConfig;
   stealth: StealthConfig;
 };
 
@@ -43,6 +52,13 @@ export const DEFAULT_STORAGE: ExtensionStorage = {
       perturbCurves: true,
       perturbGradients: true,
       perturbImages: false
+    },
+    audio: {
+      enabled: true,
+      mode: "domain",
+      bufferNoiseScore: 80,
+      perturbCompressor: true,
+      perturbAnalyser: true
     },
     stealth: {
       enabled: true,
@@ -73,4 +89,3 @@ export const mergeDefaults = <T extends Record<string, unknown>>(defaults: T, va
 export const normalizeStorage = (value: unknown): ExtensionStorage => {
   return mergeDefaults(DEFAULT_STORAGE, value);
 };
-

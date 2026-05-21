@@ -2,7 +2,7 @@ import type { ExtensionStorage } from "../../../shared/config";
 import { stableNoise } from "../../core/random";
 import { record } from "../../core/record";
 import { nativeProxy, registerFunction } from "../../core/stealth";
-import { resolveSeed } from "../../core/seed";
+import { resolveCanvasSeed } from "../../core/seed";
 import { addPoint, addRegion, addRisk, createPathState, createProfile, type Canvas2DProfile } from "./profile";
 import { perturbImageData, perturbNumber } from "./perturb";
 
@@ -59,7 +59,7 @@ export const installCanvas2D = (storage: ExtensionStorage) => {
   const config = storage.config.canvas2d;
   if (!storage.config.enabled || !config.enabled) return;
 
-  const seed = resolveSeed(storage);
+  const seed = resolveCanvasSeed(storage);
   if (!seed) return;
 
   const rawGetContext = HTMLCanvasElement.prototype.getContext;

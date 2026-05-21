@@ -1,5 +1,6 @@
 import type { ExtensionStorage } from "../shared/config";
 import { installStealth } from "./core/stealth";
+import { installAudio } from "./modules/audio";
 import { installCanvas2D } from "./modules/canvas2d";
 
 const defaultStorage: ExtensionStorage = {
@@ -16,6 +17,13 @@ const defaultStorage: ExtensionStorage = {
       perturbCurves: true,
       perturbGradients: true,
       perturbImages: false
+    },
+    audio: {
+      enabled: true,
+      mode: "domain",
+      bufferNoiseScore: 80,
+      perturbCompressor: true,
+      perturbAnalyser: true
     },
     stealth: {
       enabled: true,
@@ -61,4 +69,5 @@ if (storage?.config.enabled) {
     installStealth(storage.config.stealth);
   }
   installCanvas2D(storage);
+  installAudio(storage);
 }

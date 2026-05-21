@@ -12,6 +12,110 @@ let activeTab: chrome.tabs.Tab | undefined;
 let hostname: string | undefined;
 let storage: BackgroundResponseMap["storage.get"] | undefined;
 
+type ProtectionView = {
+  name: string;
+  enabled: boolean;
+  implemented: boolean;
+  mode?: string;
+  details: string[];
+};
+
+const makeProtectionViews = (): ProtectionView[] => {
+  if (!storage) return [];
+  const globalEnabled = storage.config.enabled;
+  const canvas = storage.config.canvas2d;
+  const audio = storage.config.audio;
+  const stealth = storage.config.stealth;
+
+  return [
+    {
+      name: "Canvas 2D",
+      enabled: globalEnabled && canvas.enabled,
+      implemented: true,
+      mode: canvas.mode,
+      details: [
+        `export noise score >= ${canvas.exportNoiseScore}`,
+        canvas.perturbText ? "text on" : "text off",
+        canvas.perturbCurves ? "curves on" : "curves off",
+        canvas.perturbGradients ? "gradients tracked" : "gradients off",
+        canvas.perturbImages ? "images on" : "images tracked only"
+      ]
+    },
+    {
+      name: "Audio",
+      enabled: globalEnabled && audio.enabled,
+      implemented: true,
+      mode: audio.mode,
+      details: [
+        `offline buffer noise score >= ${audio.bufferNoiseScore}`,
+        audio.perturbCompressor ? "compressor on" : "compressor off",
+        audio.perturbAnalyser ? "analyser on" : "analyser off"
+      ]
+    },
+    {
+      name: "Native function stealth",
+      enabled: globalEnabled && stealth.enabled,
+      implemented: true,
+      details: [
+        "toString masking",
+        "descriptor and ownKeys filtering",
+        stealth.recordNativeChecks ? "native checks recorded" : "native checks hidden"
+      ]
+    },
+    {
+      name: "WebGL",
+      enabled: false,
+      implemented: false,
+      details: ["planned: metadata bucketization and risk-based readPixels noise"]
+    },
+    {
+      name: "WebGPU",
+      enabled: false,
+      implemented: false,
+      details: ["planned: capability bucketization and readback noise"]
+    },
+    {
+      name: "Fonts",
+      enabled: false,
+      implemented: false,
+      details: ["planned: bulk measurement detection and local-font probing protection"]
+    },
+    {
+      name: "Navigator / headers",
+      enabled: false,
+      implemented: false,
+      details: ["planned: stable values and request header consistency"]
+    }
+  ];
+};
+
+const renderProtections = () => {
+  const container = $("protections");
+  container.textContent = "";
+  for (const item of makeProtectionViews()) {
+    const row = document.createElement("div");
+    row.className = "protection";
+
+    const statusClass = !item.implemented ? "planned" : item.enabled ? "on" : "off";
+    const statusText = !item.implemented ? "planned" : item.enabled ? "on" : "off";
+    const modeTag = item.mode ? `<span class="tag mode">mode: ${item.mode}</span>` : "";
+    const details = item.details.map((detail) => `<span class="tag">${detail}</span>`).join("");
+
+    row.innerHTML = `
+      <div class="protection-head">
+        <span class="protection-title">${item.name}</span>
+        <span class="tag ${statusClass}">${statusText}</span>
+      </div>
+      <div class="protection-meta">
+        ${modeTag}
+        ${details}
+      </div>
+      <div class="protection-desc">${item.implemented ? "Implemented in current build." : "Not active in current build."}</div>
+    `;
+    container.appendChild(row);
+  }
+};
+
 const renderRecords = async () => {
   const container = $("records");
   if (!activeTab?.id) {
@@ -40,8 +144,7 @@ const render = () => {
   if (!storage) return;
   $("version").textContent = `v${chrome.runtime.getManifest().version}`;
   $("domain").textContent = hostname ?? "unsupported";
-  $("canvas-mode").textContent = storage.config.canvas2d.mode;
-  $("stealth").textContent = storage.config.stealth.enabled ? "enabled" : "disabled";
+  renderProtections();
 
   const enabledButton = $<HTMLButtonElement>("toggle-enabled");
   enabledButton.textContent = storage.config.enabled ? "Enabled" : "Disabled";
