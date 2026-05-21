@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Leakdig Style Canvas Abnormal Detection</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+
+      h1 {
+        font-size: 22px;
+        margin: 0 0 16px;
+      }
+
+      .summary {
+        border: 1px solid #8a8a8a;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        padding: 14px 16px;
+      }
+
+      .summary.fail {
+        border-color: #cc3333;
+      }
+
+      .summary.pass {
+        border-color: #1f8f52;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #8a8a8a55;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 13px;
+      }
+
+      .pass-text {
+        color: #1f8f52;
+        font-weight: 700;
+      }
+
+      .fail-text {
+        color: #cc3333;
+        font-weight: 700;
+      }
+
+      pre {
+        background: #80808022;
+        border-radius: 8px;
+        overflow: auto;
+        padding: 12px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Leakdig Style Canvas Abnormal Detection</h1>
+    <div id="summary" class="summary">Running...</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Status</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody id="checks"></tbody>
+    </table>
+    <h2>Raw Result</h2>
+    <pre id="raw"></pre>
+
+    <script>
+      const methodNames = [
+        "getContext",
+        "toDataURL",
+        "toBlob",
+        "fillRect",
+        "strokeRect",
+        "fillText",
+        "strokeText",
+        "measureText",
+        "getImageData",
+        "putImageData",
+        "drawImage",
+        "createLinearGradient",
+        "createRadialGradient",
+        "arc",
+        "ellipse",
+        "bezierCurveTo",
+        "quadraticCurveTo"
+      ];
+
+      const hashString = (value) => {
+        let h = 2166136261;
+        for (let i = 0; i < value.length; i++) {
+          h ^= value.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const hashBytes = (bytes) => {
+        let h = 2166136261;
+        for (let i = 0; i < bytes.length; i++) {
+          h ^= bytes[i];
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const stringifyDescriptor = (descriptor) => {
+        if (!descriptor) return "missing";
+        const copy = {};
+        for (const key of ["writable", "enumerable", "configurable", "get", "set", "value"]) {
+          if (!(key in descriptor)) continue;
+          if (key === "value") {
+            copy.valueType = typeof descriptor.value;
+            copy.valueName = descriptor.value && descriptor.value.name;
+            copy.valueLength = descriptor.value && descriptor.value.length;
+          } else if (key === "get" || key === "set") {
+            copy[key] = descriptor[key] ? descriptor[key].name || "anonymous" : null;
+          } else {
+            copy[key] = descriptor[key];
+          }
+        }
+        return JSON.stringify(copy);
+      };
+
+      const sameDescriptorShape = (left, right) => {
+        if (!left || !right) return left === right;
+        return (
+          left.writable === right.writable &&
+          left.enumerable === right.enumerable &&
+          left.configurable === right.configurable &&
+          typeof left.value === typeof right.value &&
+          typeof left.get === typeof right.get &&
+          typeof left.set === typeof right.set
+        );
+      };
+
+      const createCleanRealm = () => {
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = "about:blank";
+        document.documentElement.appendChild(iframe);
+        return {
+          win: iframe.contentWindow,
+          dispose: () => iframe.remove()
+        };
+      };
+
+      const getOwner = (methodName, win = window) => {
+        if (methodName === "getContext" || methodName === "toDataURL" || methodName === "toBlob") {
+          return win.HTMLCanvasElement.prototype;
+        }
+        return win.CanvasRenderingContext2D.prototype;
+      };
+
+      const getMethod = (methodName, win = window) => {
+        return getOwner(methodName, win)[methodName];
+      };
+
+      const renderFingerprintCanvas = (canvas) => {
+        canvas.width = 280;
+        canvas.height = 120;
+        const ctx = canvas.getContext("2d");
+        const gradient = ctx.createLinearGradient(0, 0, 280, 0);
+        gradient.addColorStop(0, "#102a43");
+        gradient.addColorStop(0.52, "#47a3f3");
+        gradient.addColorStop(1, "#f0f4f8");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 280, 120);
+        ctx.globalAlpha = 0.92;
+        ctx.font = "19px Arial";
+        ctx.fillStyle = "#172b4d";
+        ctx.fillText("Leakdig Canvas Probe", 14.35, 45.75);
+        ctx.strokeStyle = "rgba(160, 32, 240, 0.72)";
+        ctx.lineWidth = 1.35;
+        ctx.beginPath();
+        ctx.moveTo(10.5, 95.25);
+        ctx.bezierCurveTo(76.1, 2.4, 145.8, 132.2, 266.2, 24.7);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        return ctx;
+      };
+
+      const drawImageConsistency = () => {
+        const source = document.createElement("canvas");
+        source.width = 64;
+        source.height = 64;
+        const sourceCtx = source.getContext("2d");
+        sourceCtx.fillStyle = "#f5f7fa";
+        sourceCtx.fillRect(0, 0, 64, 64);
+        sourceCtx.font = "15px Arial";
+        sourceCtx.fillStyle = "#1f2933";
+        sourceCtx.fillText("LD", 8.4, 36.6);
+        sourceCtx.beginPath();
+        sourceCtx.arc(44.5, 30.5, 14.25, 0, Math.PI * 1.8);
+        sourceCtx.stroke();
+
+        const first = document.createElement("canvas");
+        first.width = 96;
+        first.height = 96;
+        const firstCtx = first.getContext("2d");
+        firstCtx.drawImage(source, 0, 0, 96, 96);
+
+        const second = document.createElement("canvas");
+        second.width = 96;
+        second.height = 96;
+        const secondCtx = second.getContext("2d");
+        secondCtx.drawImage(source, 0, 0, 96, 96);
+
+        const firstPixels = firstCtx.getImageData(0, 0, 96, 96).data;
+        const secondPixels = secondCtx.getImageData(0, 0, 96, 96).data;
+        return {
+          first: hashBytes(firstPixels),
+          second: hashBytes(secondPixels),
+          stable: hashBytes(firstPixels) === hashBytes(secondPixels)
+        };
+      };
+
+      const countColors = (data) => {
+        const colors = new Set();
+        for (let i = 0; i < data.length; i += 4) {
+          colors.add(data[i] + "," + data[i + 1] + "," + data[i + 2] + "," + data[i + 3]);
+        }
+        return colors.size;
+      };
+
+      const checks = [];
+      const addCheck = (name, failed, details, severity = failed ? "high" : "info") => {
+        checks.push({ name, failed, details, severity });
+      };
+
+      const clean = createCleanRealm();
+      try {
+        const cleanToString = clean.win.Function.prototype.toString;
+        const localToString = Function.prototype.toString;
+        const localToStringSource = localToString.call(localToString);
+        const cleanToStringSource = cleanToString.call(cleanToString);
+
+        addCheck(
+          "Function.prototype.toString realm match",
+          localToStringSource !== cleanToStringSource,
+          {
+            localHash: hashString(localToStringSource),
+            cleanHash: hashString(cleanToStringSource),
+            localDescriptor: stringifyDescriptor(
+              Object.getOwnPropertyDescriptor(Function.prototype, "toString")
+            ),
+            cleanDescriptor: stringifyDescriptor(
+              Object.getOwnPropertyDescriptor(clean.win.Function.prototype, "toString")
+            )
+          }
+        );
+
+        for (const methodName of methodNames) {
+          const owner = getOwner(methodName);
+          const cleanOwner = getOwner(methodName, clean.win);
+          const method = owner[methodName];
+          const cleanMethod = cleanOwner[methodName];
+          if (typeof method !== "function" || typeof cleanMethod !== "function") continue;
+
+          const directSource = method.toString();
+          const borrowedSource = Function.prototype.toString.call(method);
+          const cleanBorrowedSource = cleanToString.call(method);
+          const cleanNativeSource = cleanToString.call(cleanMethod);
+
+          addCheck(
+            methodName + " native string",
+            directSource !== borrowedSource ||
+              borrowedSource !== cleanNativeSource ||
+              cleanBorrowedSource !== cleanNativeSource ||
+              !/\[native code\]/.test(borrowedSource),
+            {
+              directHash: hashString(directSource),
+              localBorrowedHash: hashString(borrowedSource),
+              cleanBorrowedHash: hashString(cleanBorrowedSource),
+              cleanNativeHash: hashString(cleanNativeSource)
+            }
+          );
+
+          addCheck(
+            methodName + " name/length",
+            method.name !== cleanMethod.name || method.length !== cleanMethod.length,
+            {
+              current: { name: method.name, length: method.length },
+              clean: { name: cleanMethod.name, length: cleanMethod.length }
+            },
+            "medium"
+          );
+
+          const descriptor = Object.getOwnPropertyDescriptor(owner, methodName);
+          const cleanDescriptor = Object.getOwnPropertyDescriptor(cleanOwner, methodName);
+          addCheck(
+            methodName + " descriptor",
+            !sameDescriptorShape(descriptor, cleanDescriptor),
+            {
+              current: stringifyDescriptor(descriptor),
+              clean: stringifyDescriptor(cleanDescriptor)
+            },
+            "medium"
+          );
+
+          const ownNames = Object.getOwnPropertyNames(method).filter(
+            (key) => !["length", "name"].includes(key)
+          );
+          const cleanOwnNames = Object.getOwnPropertyNames(cleanMethod).filter(
+            (key) => !["length", "name"].includes(key)
+          );
+          addCheck(
+            methodName + " own properties",
+            ownNames.join("|") !== cleanOwnNames.join("|"),
+            { current: ownNames, clean: cleanOwnNames },
+            "medium"
+          );
+        }
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        addCheck(
+          "context prototype",
+          Object.getPrototypeOf(ctx) !== CanvasRenderingContext2D.prototype ||
+            !(ctx instanceof CanvasRenderingContext2D),
+          {
+            prototypeMatches: Object.getPrototypeOf(ctx) === CanvasRenderingContext2D.prototype,
+            instanceofContext: ctx instanceof CanvasRenderingContext2D
+          },
+          "high"
+        );
+
+        const instanceMismatches = [];
+        for (const methodName of methodNames) {
+          if (methodName === "getContext" || methodName === "toDataURL" || methodName === "toBlob") {
+            continue;
+          }
+          if (typeof ctx[methodName] !== "function") continue;
+          if (ctx[methodName] !== CanvasRenderingContext2D.prototype[methodName]) {
+            instanceMismatches.push(methodName);
+          }
+          if (ctx[methodName] !== ctx[methodName]) {
+            instanceMismatches.push(methodName + ":unstable-reference");
+          }
+        }
+        addCheck(
+          "context method reference",
+          instanceMismatches.length > 0,
+          { mismatches: instanceMismatches },
+          "high"
+        );
+
+        const ownContextMethods = Object.getOwnPropertyNames(ctx).filter(
+          (key) => methodNames.includes(key) || typeof ctx[key] === "function"
+        );
+        addCheck(
+          "context own methods",
+          ownContextMethods.length > 0,
+          { ownContextMethods },
+          "medium"
+        );
+
+        const probe = document.createElement("canvas");
+        const probeCtx = renderFingerprintCanvas(probe);
+        const dataUrlA = probe.toDataURL();
+        const dataUrlB = probe.toDataURL();
+        const imageDataA = probeCtx.getImageData(0, 0, probe.width, probe.height);
+        const imageDataB = probeCtx.getImageData(0, 0, probe.width, probe.height);
+        addCheck(
+          "canvas read stability",
+          dataUrlA !== dataUrlB || hashBytes(imageDataA.data) !== hashBytes(imageDataB.data),
+          {
+            dataUrlA: hashString(dataUrlA),
+            dataUrlB: hashString(dataUrlB),
+            imageDataA: hashBytes(imageDataA.data),
+            imageDataB: hashBytes(imageDataB.data)
+          },
+          "high"
+        );
+
+        const blank = document.createElement("canvas");
+        blank.width = 8;
+        blank.height = 8;
+        const blankData = blank.getContext("2d").getImageData(0, 0, 8, 8).data;
+        const blankChanged = Array.from(blankData).some((value, index) => {
+          return index % 4 === 3 ? value !== 0 : value !== 0;
+        });
+        addCheck(
+          "blank canvas unchanged",
+          blankChanged,
+          { hash: hashBytes(blankData), colors: countColors(blankData) },
+          "high"
+        );
+
+        const solid = document.createElement("canvas");
+        solid.width = 32;
+        solid.height = 32;
+        const solidCtx = solid.getContext("2d");
+        solidCtx.fillStyle = "#224466";
+        solidCtx.fillRect(0, 0, 32, 32);
+        const solidData = solidCtx.getImageData(0, 0, 32, 32).data;
+        addCheck(
+          "solid color low entropy",
+          countColors(solidData) !== 1,
+          { colors: countColors(solidData), hash: hashBytes(solidData) },
+          "medium"
+        );
+
+        const imageResult = drawImageConsistency();
+        addCheck(
+          "drawImage pixel consistency",
+          !imageResult.stable,
+          imageResult,
+          "high"
+        );
+      } catch (error) {
+        addCheck(
+          "runner exception",
+          true,
+          { message: error && error.message, stack: error && error.stack },
+          "high"
+        );
+      } finally {
+        clean.dispose();
+      }
+
+      const failed = checks.filter((check) => check.failed);
+      const summary = document.getElementById("summary");
+      summary.className = "summary " + (failed.length ? "fail" : "pass");
+      summary.textContent = failed.length
+        ? "Canvas abnormal: " + failed.length + " suspicious checks failed"
+        : "Canvas looks normal under this leakdig-style probe";
+
+      const tbody = document.getElementById("checks");
+      for (const check of checks) {
+        const tr = document.createElement("tr");
+        const name = document.createElement("td");
+        const status = document.createElement("td");
+        const details = document.createElement("td");
+        name.textContent = check.name;
+        status.textContent = check.failed ? "FAIL" : "PASS";
+        status.className = check.failed ? "fail-text" : "pass-text";
+        details.textContent = JSON.stringify(check.details, null, 2);
+        tr.append(name, status, details);
+        tbody.append(tr);
+      }
+
+      document.getElementById("raw").textContent = JSON.stringify(
+        {
+          canvasAbnormal: failed.length > 0,
+          failed: failed.map((check) => check.name),
+          checks
+        },
+        null,
+        2
+      );
+    </script>
+  </body>
+</html>

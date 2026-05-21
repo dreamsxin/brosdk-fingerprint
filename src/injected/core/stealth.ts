@@ -53,7 +53,8 @@ export const registerFunction = <T extends Function>(wrapped: T, raw: Function, 
   try {
     Object.defineProperty(wrapped, "name", {
       value: raw.name,
-      configurable: true
+      configurable: true,
+      enumerable: false
     });
   } catch {
     // Some engines reject redefining function metadata.
@@ -62,7 +63,8 @@ export const registerFunction = <T extends Function>(wrapped: T, raw: Function, 
   try {
     Object.defineProperty(wrapped, "length", {
       value: raw.length,
-      configurable: true
+      configurable: true,
+      enumerable: false
     });
   } catch {
     // Some engines reject redefining function metadata.
@@ -84,49 +86,63 @@ export const installStealth = (options: { recordNativeChecks: boolean }) => {
     if (options.recordNativeChecks) record(`native-check.${key}`, "high");
   };
 
-  Function.prototype.toString = registerFunction(function toString(this: Function) {
-    const mapped = functionMap.get(this);
-    if (mapped) {
-      maybeRecord("toString");
-      return mapped.source;
-    }
-    return originals.functionToString.call(this);
-  }, originals.functionToString) as typeof Function.prototype.toString;
-
-  Object.getOwnPropertyNames = registerFunction(function getOwnPropertyNames(target: object) {
-    maybeRecord("ownKeys");
-    return filterKeys(target, originals.getOwnPropertyNames(target));
-  }, originals.getOwnPropertyNames) as typeof Object.getOwnPropertyNames;
-
-  Object.getOwnPropertySymbols = registerFunction(function getOwnPropertySymbols(target: object) {
-    maybeRecord("ownKeys");
-    return filterKeys(target, originals.getOwnPropertySymbols(target));
-  }, originals.getOwnPropertySymbols) as typeof Object.getOwnPropertySymbols;
-
-  Reflect.ownKeys = registerFunction(function ownKeys(target: object) {
-    maybeRecord("ownKeys");
-    return filterKeys(target, originals.reflectOwnKeys(target));
-  }, originals.reflectOwnKeys) as typeof Reflect.ownKeys;
-
-  Object.getOwnPropertyDescriptor = registerFunction(function getOwnPropertyDescriptor(target: object, key: PropertyKey) {
-    const hidden = hiddenKeys.get(target);
-    if (hidden?.has(key) || (typeof key === "symbol" && internalSymbols.has(key))) {
-      maybeRecord("descriptor");
-      return undefined;
-    }
-    return originals.getOwnPropertyDescriptor(target, key);
-  }, originals.getOwnPropertyDescriptor) as typeof Object.getOwnPropertyDescriptor;
-
-  Object.getOwnPropertyDescriptors = registerFunction(function getOwnPropertyDescriptors(target: object) {
-    maybeRecord("descriptor");
-    const descriptors = originals.getOwnPropertyDescriptors(target);
-    for (const key of Reflect.ownKeys(descriptors)) {
-      const hidden = hiddenKeys.get(target);
-      if (hidden?.has(key) || (typeof key === "symbol" && internalSymbols.has(key))) {
-        delete descriptors[key as keyof typeof descriptors];
+  const toStringProxy = nativeProxy(originals.functionToString, {
+    apply(target, thisArg: Function, args) {
+      const mapped = functionMap.get(thisArg);
+      if (mapped) {
+        maybeRecord("toString");
+        return mapped.source;
       }
+      return Reflect.apply(target, thisArg, args);
     }
-    return descriptors;
-  }, originals.getOwnPropertyDescriptors) as typeof Object.getOwnPropertyDescriptors;
-};
+  });
+  Function.prototype.toString = toStringProxy as typeof Function.prototype.toString;
 
+  Object.getOwnPropertyNames = nativeProxy(originals.getOwnPropertyNames, {
+    apply(target, thisArg, args: [object]) {
+      maybeRecord("ownKeys");
+      return filterKeys(args[0], Reflect.apply(target, thisArg, args));
+    }
+  }) as typeof Object.getOwnPropertyNames;
+
+  Object.getOwnPropertySymbols = nativeProxy(originals.getOwnPropertySymbols, {
+    apply(target, thisArg, args: [object]) {
+      maybeRecord("ownKeys");
+      return filterKeys(args[0], Reflect.apply(target, thisArg, args));
+    }
+  }) as typeof Object.getOwnPropertySymbols;
+
+  Reflect.ownKeys = nativeProxy(originals.reflectOwnKeys, {
+    apply(target, thisArg, args: [object]) {
+      maybeRecord("ownKeys");
+      return filterKeys(args[0], Reflect.apply(target, thisArg, args));
+    }
+  }) as typeof Reflect.ownKeys;
+
+  Object.getOwnPropertyDescriptor = nativeProxy(originals.getOwnPropertyDescriptor, {
+    apply(target, thisArg, args: [object, PropertyKey]) {
+      const [objectTarget, key] = args;
+      const hidden = hiddenKeys.get(objectTarget);
+      if (hidden?.has(key) || (typeof key === "symbol" && internalSymbols.has(key))) {
+        maybeRecord("descriptor");
+        return undefined;
+      }
+      return Reflect.apply(target, thisArg, args);
+    }
+  }) as typeof Object.getOwnPropertyDescriptor;
+
+  Object.getOwnPropertyDescriptors = nativeProxy(originals.getOwnPropertyDescriptors, {
+    apply(target, thisArg, args: [object]) {
+      maybeRecord("descriptor");
+      const objectTarget = args[0];
+      const descriptors = Reflect.apply(target, thisArg, args);
+      const hidden = hiddenKeys.get(objectTarget);
+      for (const key of Reflect.ownKeys(descriptors)) {
+        if (hidden?.has(key) || (typeof key === "symbol" && internalSymbols.has(key))) {
+          delete descriptors[key as keyof typeof descriptors];
+        }
+      }
+      return descriptors;
+    }
+  }) as typeof Object.getOwnPropertyDescriptors;
+};
