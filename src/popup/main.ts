@@ -156,6 +156,51 @@ const renderRecords = async () => {
   }
 };
 
+const renderDetection = async () => {
+  const container = $("detection");
+  if (!activeTab?.id) {
+    container.textContent = "No active tab.";
+    return;
+  }
+
+  const detection = await send("detection.get", { tabId: activeTab.id });
+  if (detection.level === "none") {
+    container.textContent = "No fingerprint activity yet.";
+    return;
+  }
+
+  const surfaceRows = detection.surfaces
+    .filter((surface) => surface.surface !== "unknown")
+    .slice(0, 4)
+    .map((surface) => {
+      const signals = surface.signals.map((signal) => `<span class="tag">${signal}</span>`).join("");
+      return `
+        <div class="detection-surface">
+          <div class="detection-surface-head">
+            <span>${surface.label}</span>
+            <span class="tag ${surface.level}">${surface.score}</span>
+          </div>
+          <div class="protection-meta">${signals}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `
+    <div class="detection-summary ${detection.level}">
+      <div>
+        <div class="detection-title">${detection.level.toUpperCase()} fingerprint risk</div>
+        <div class="detection-subtitle">${detection.activeSurfaces} surfaces, ${detection.totalCount} events, ${detection.highCount} high-risk</div>
+      </div>
+      <span class="score">${detection.score}</span>
+    </div>
+    <div class="detection-signals">
+      ${detection.signals.map((signal) => `<span class="tag">${signal}</span>`).join("")}
+    </div>
+    <div class="detection-surfaces">${surfaceRows}</div>
+  `;
+};
+
 const render = () => {
   if (!storage) return;
   $("version").textContent = `v${chrome.runtime.getManifest().version}`;
@@ -203,6 +248,9 @@ void (async () => {
   hostname = getHostname(activeTab?.url);
   storage = await send("storage.get");
   render();
-  await renderRecords();
-  window.setInterval(renderRecords, 1500);
+  await Promise.all([renderRecords(), renderDetection()]);
+  window.setInterval(() => {
+    void renderRecords();
+    void renderDetection();
+  }, 1500);
 })();

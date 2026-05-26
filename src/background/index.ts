@@ -1,4 +1,5 @@
 import { domainMatches, getHostname } from "../shared/domain";
+import { analyzeFingerprintRecords } from "../shared/detection";
 import type { BackgroundMessage, ContentToBackgroundMessage } from "../shared/messages";
 import { hashString } from "../shared/random";
 import { clearRecords, getRecords, pushRecord } from "./records";
@@ -6,10 +7,13 @@ import { getStorage, initStorage, saveStorage } from "./storage";
 
 const setBadge = async (tabId: number) => {
   const records = getRecords(tabId);
-  const high = records.some((record) => record.level === "high");
+  const detection = analyzeFingerprintRecords(records);
   const count = records.length;
   await chrome.action.setBadgeText({ tabId, text: count ? String(count) : "" });
-  await chrome.action.setBadgeBackgroundColor({ tabId, color: high ? "#b42318" : "#2563eb" });
+  await chrome.action.setBadgeBackgroundColor({
+    tabId,
+    color: detection.level === "high" ? "#b42318" : detection.level === "medium" ? "#b54708" : "#2563eb"
+  });
 };
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -70,6 +74,8 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage | ContentToBack
       }
       case "records.get":
         return getRecords(message.tabId);
+      case "detection.get":
+        return analyzeFingerprintRecords(getRecords(message.tabId));
       default:
         return undefined;
     }

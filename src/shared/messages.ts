@@ -1,4 +1,5 @@
 import type { ExtensionStorage } from "./config";
+import type { FingerprintDetectionSummary } from "./detection";
 
 export type FingerprintRecord = {
   key: string;
@@ -15,7 +16,8 @@ export type BackgroundMessage =
   | { type: "config.setEnabled"; enabled: boolean }
   | { type: "config.setSeed"; seedText: string }
   | { type: "whitelist.toggle"; hostname: string }
-  | { type: "records.get"; tabId: number };
+  | { type: "records.get"; tabId: number }
+  | { type: "detection.get"; tabId: number };
 
 export type BackgroundResponseMap = {
   "storage.get": ExtensionStorage;
@@ -23,6 +25,7 @@ export type BackgroundResponseMap = {
   "config.setSeed": ExtensionStorage;
   "whitelist.toggle": ExtensionStorage;
   "records.get": FingerprintRecord[];
+  "detection.get": FingerprintDetectionSummary;
 };
 
 export const PAGE_MESSAGE_KEY = "__brosdk_fp__";

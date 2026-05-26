@@ -2,6 +2,10 @@ import type { ExtensionStorage } from "../shared/config";
 import { installStealth } from "./core/stealth";
 import { installAudio } from "./modules/audio";
 import { installCanvas2D } from "./modules/canvas2d";
+import { installFontDetection } from "./modules/fonts";
+import { installIdentityDetection } from "./modules/identity";
+import { installRuntimeDetection } from "./modules/runtime";
+import { installSystemDetection } from "./modules/system";
 import { installWebGL } from "./modules/webgl";
 
 const defaultStorage: ExtensionStorage = {
@@ -84,4 +88,8 @@ if (storage?.config.enabled) {
   installCanvas2D(storage);
   installAudio(storage);
   installWebGL(storage);
+  installIdentityDetection();
+  installFontDetection();
+  installSystemDetection();
+  installRuntimeDetection();
 }

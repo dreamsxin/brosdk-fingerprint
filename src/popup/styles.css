@@ -98,6 +98,83 @@ button.warning {
   overflow: auto;
 }
 
+.detection {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.detection-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+  padding: 9px;
+  background: #ffffff;
+}
+
+.detection-summary.low {
+  border-color: #b2ddff;
+}
+
+.detection-summary.medium {
+  border-color: #fedf89;
+}
+
+.detection-summary.high {
+  border-color: #fecdca;
+}
+
+.detection-title {
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.detection-subtitle {
+  color: #475467;
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 28px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  font-weight: 800;
+}
+
+.detection-signals,
+.detection-surfaces {
+  display: grid;
+  gap: 6px;
+}
+
+.detection-signals {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.detection-surface {
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.detection-surface-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 750;
+}
+
 .protections {
   display: grid;
   gap: 8px;
@@ -193,14 +270,18 @@ button.warning {
 
   header,
   .record,
-  .protection {
+  .protection,
+  .detection-summary,
+  .detection-surface {
     border-color: #374151;
   }
 
   button,
   input,
   .record,
-  .protection {
+  .protection,
+  .detection-summary,
+  .detection-surface {
     background: #1f2937;
     color: #f9fafb;
   }
@@ -209,7 +290,8 @@ button.warning {
     color: #d1d5db;
   }
 
-  .protection-desc {
+  .protection-desc,
+  .detection-subtitle {
     color: #d1d5db;
   }
 }

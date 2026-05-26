@@ -1,0 +1,1253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fingerprint Surface Detection</title>
+    <script>
+      (function snapshotNativeSurface() {
+        function getFromPath(path, root) {
+          return path.split(".").reduce(function (value, key) {
+            return value == null ? undefined : value[key];
+          }, root || window);
+        }
+
+        var paths = [
+          "Function.prototype.toString",
+          "Object.keys",
+          "Object.getOwnPropertyDescriptor",
+          "Navigator.prototype.userAgent",
+          "Navigator.prototype.platform",
+          "Navigator.prototype.languages",
+          "Navigator.prototype.hardwareConcurrency",
+          "Navigator.prototype.deviceMemory",
+          "Navigator.prototype.webdriver",
+          "Navigator.prototype.plugins",
+          "Navigator.prototype.mimeTypes",
+          "Navigator.prototype.userAgentData",
+          "Navigator.prototype.connection",
+          "Navigator.prototype.mediaDevices",
+          "Navigator.prototype.getBattery",
+          "Screen.prototype.width",
+          "Screen.prototype.height",
+          "Screen.prototype.availWidth",
+          "Screen.prototype.availHeight",
+          "Date.prototype.getTimezoneOffset",
+          "Intl.DateTimeFormat",
+          "OfflineAudioContext",
+          "AudioBuffer.prototype.getChannelData",
+          "AudioBuffer.prototype.copyFromChannel",
+          "AnalyserNode.prototype.getFloatFrequencyData",
+          "DynamicsCompressorNode.prototype.reduction",
+          "WebGLRenderingContext.prototype.getParameter",
+          "WebGLRenderingContext.prototype.getExtension",
+          "WebGLRenderingContext.prototype.getSupportedExtensions",
+          "WebGLRenderingContext.prototype.readPixels",
+          "WebGL2RenderingContext.prototype.getParameter",
+          "WebGL2RenderingContext.prototype.readPixels",
+          "FontFace",
+          "Document.prototype.fonts",
+          "Document.prototype.createElement",
+          "Document.prototype.querySelector",
+          "Performance.prototype.timing",
+          "RTCPeerConnection",
+          "Navigator.prototype.gpu"
+        ];
+
+        window.__fingerprintSurfaceSnapshot = Object.freeze(
+          paths.reduce(function (snapshot, path) {
+            snapshot[btoa(path)] = getFromPath(path);
+            return snapshot;
+          }, {})
+        );
+      })();
+    </script>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+
+      h1 {
+        font-size: 22px;
+        margin: 0 0 16px;
+      }
+
+      .summary {
+        border: 1px solid #8a8a8a;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        padding: 14px 16px;
+      }
+
+      .summary.fail {
+        border-color: #cc3333;
+      }
+
+      .summary.pass {
+        border-color: #1f8f52;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-top: 1px solid #777;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        background: Canvas;
+      }
+
+      td:first-child {
+        width: 250px;
+      }
+
+      td:nth-child(2) {
+        width: 72px;
+        font-weight: 700;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .fail-text {
+        color: #cc3333;
+      }
+
+      .pass-text {
+        color: #1f8f52;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Fingerprint Surface Detection</h1>
+    <div id="summary" class="summary">Running...</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Status</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody id="checks"></tbody>
+    </table>
+    <pre id="raw"></pre>
+
+    <script>
+      const checks = [];
+
+      const hashString = (value) => {
+        const text = String(value == null ? "" : value);
+        let h = 2166136261;
+        for (let i = 0; i < text.length; i++) {
+          h ^= text.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const hashBytes = (bytes) => {
+        let h = 2166136261;
+        for (let i = 0; i < bytes.length; i++) {
+          h ^= bytes[i] & 0xff;
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const addCheck = (name, failed, details, severity = failed ? "high" : "info") => {
+        checks.push({ name, failed: Boolean(failed), details, severity });
+      };
+
+      const withTimeout = (promise, ms, fallback) => {
+        return Promise.race([
+          promise,
+          new Promise((resolve) => {
+            setTimeout(() => resolve(fallback), ms);
+          })
+        ]);
+      };
+
+      const isNativeFunction = (fn) => {
+        try {
+          return /\{\s*\[native code\]\s*\}/.test(Function.prototype.toString.call(fn));
+        } catch {
+          return false;
+        }
+      };
+
+      const getFromPath = (path, root = window) => {
+        return path.split(".").reduce((value, key) => (value == null ? undefined : value[key]), root);
+      };
+
+      const stringifyDescriptor = (descriptor) => {
+        if (!descriptor) return "missing";
+        const out = {};
+        for (const key of ["writable", "enumerable", "configurable", "get", "set", "value"]) {
+          if (!(key in descriptor)) continue;
+          if (key === "value") {
+            out.valueType = typeof descriptor.value;
+            out.valueName = descriptor.value && descriptor.value.name;
+          } else if (key === "get" || key === "set") {
+            out[key] = descriptor[key] ? descriptor[key].name || "anonymous" : null;
+          } else {
+            out[key] = descriptor[key];
+          }
+        }
+        return out;
+      };
+
+      const proxyHookHandle = (value) => {
+        try {
+          Date.prototype.toString.call(value);
+        } catch (error) {
+          return String((error && error.stack) || "").includes("Proxy.");
+        }
+        return false;
+      };
+
+      const createCleanRealm = () => {
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = "about:blank";
+        document.documentElement.appendChild(iframe);
+        return {
+          win: iframe.contentWindow,
+          dispose: () => iframe.remove()
+        };
+      };
+
+      const compareSnapshot = () => {
+        const snapshot = window.__fingerprintSurfaceSnapshot || {};
+        const results = [];
+        for (const encodedPath in snapshot) {
+          const path = atob(encodedPath);
+          const originalValue = snapshot[encodedPath];
+          const currentValue = getFromPath(path);
+          results.push({
+            path,
+            same: originalValue === currentValue,
+            currentType: typeof currentValue,
+            originalType: typeof originalValue
+          });
+        }
+        return results;
+      };
+
+      const getNativeSurfaceFlags = () => {
+        const candidates = [
+          ["Function.prototype.toString", Function.prototype.toString],
+          ["Object.keys", Object.keys],
+          ["Object.getOwnPropertyDescriptor", Object.getOwnPropertyDescriptor],
+          ["Date.prototype.getTimezoneOffset", Date.prototype.getTimezoneOffset],
+          ["Intl.DateTimeFormat", Intl.DateTimeFormat],
+          ["OfflineAudioContext", window.OfflineAudioContext || window.webkitOfflineAudioContext],
+          ["AudioBuffer.prototype.getChannelData", window.AudioBuffer && AudioBuffer.prototype.getChannelData],
+          ["AudioBuffer.prototype.copyFromChannel", window.AudioBuffer && AudioBuffer.prototype.copyFromChannel],
+          ["AnalyserNode.prototype.getFloatFrequencyData", window.AnalyserNode && AnalyserNode.prototype.getFloatFrequencyData],
+          ["WebGLRenderingContext.prototype.getParameter", window.WebGLRenderingContext && WebGLRenderingContext.prototype.getParameter],
+          ["WebGLRenderingContext.prototype.readPixels", window.WebGLRenderingContext && WebGLRenderingContext.prototype.readPixels],
+          ["WebGL2RenderingContext.prototype.getParameter", window.WebGL2RenderingContext && WebGL2RenderingContext.prototype.getParameter],
+          ["FontFace", window.FontFace],
+          ["navigator.gpu.requestAdapter", navigator.gpu && navigator.gpu.requestAdapter]
+        ];
+        return candidates
+          .filter((entry) => typeof entry[1] === "function" && !isNativeFunction(entry[1]))
+          .map((entry) => entry[0]);
+      };
+
+      const getProxySurfaceFlags = () => {
+        const candidates = [
+          ["navigator", navigator],
+          ["screen", screen],
+          ["Function.prototype", Function.prototype],
+          ["Function.prototype.toString", Function.prototype.toString],
+          ["Date.prototype.getTimezoneOffset", Date.prototype.getTimezoneOffset],
+          ["Intl.DateTimeFormat", Intl.DateTimeFormat],
+          ["navigator.plugins", navigator.plugins],
+          ["navigator.mimeTypes", navigator.mimeTypes],
+          ["WebGLRenderingContext.prototype", window.WebGLRenderingContext && WebGLRenderingContext.prototype],
+          ["AudioBuffer.prototype", window.AudioBuffer && AudioBuffer.prototype],
+          ["FontFace", window.FontFace],
+          ["navigator.gpu", navigator.gpu]
+        ];
+        return candidates.filter((entry) => entry[1] && proxyHookHandle(entry[1])).map((entry) => entry[0]);
+      };
+
+      const getNavigatorReport = async () => {
+        const userAgentData = navigator.userAgentData;
+        let highEntropy = null;
+        if (userAgentData && userAgentData.getHighEntropyValues) {
+          try {
+            highEntropy = await userAgentData.getHighEntropyValues([
+              "architecture",
+              "bitness",
+              "fullVersionList",
+              "model",
+              "platform",
+              "platformVersion",
+              "uaFullVersion",
+              "wow64"
+            ]);
+          } catch (error) {
+            highEntropy = { error: String((error && error.message) || error) };
+          }
+        }
+
+        const plugins = Array.from(navigator.plugins || []).map((plugin) => ({
+          name: plugin.name,
+          filename: plugin.filename,
+          mimeTypes: plugin.length
+        }));
+
+        const mimeTypes = Array.from(navigator.mimeTypes || []).map((mimeType) => ({
+          type: mimeType.type,
+          suffixes: mimeType.suffixes
+        }));
+
+        const descriptorNames = [
+          "userAgent",
+          "platform",
+          "languages",
+          "hardwareConcurrency",
+          "deviceMemory",
+          "webdriver",
+          "plugins",
+          "mimeTypes",
+          "pdfViewerEnabled",
+          "maxTouchPoints"
+        ];
+        const descriptors = {};
+        for (const name of descriptorNames) {
+          descriptors[name] = stringifyDescriptor(Object.getOwnPropertyDescriptor(Navigator.prototype, name));
+        }
+
+        const ua = navigator.userAgent;
+        const chromeLike = /\bChrome\/|Chromium\/|Edg\//.test(ua);
+        const firefoxLike = /\bFirefox\//.test(ua);
+        const safariLike = /\bSafari\//.test(ua) && !chromeLike;
+        const uaDataMismatch =
+          Boolean(userAgentData) &&
+          ((chromeLike && !String(userAgentData.brands && userAgentData.brands.map((b) => b.brand).join(" ")).match(/Chrom|Google|Microsoft/)) ||
+            (userAgentData.platform && navigator.platform && !String(navigator.platform).toLowerCase().includes(String(userAgentData.platform).slice(0, 3).toLowerCase())));
+
+        return {
+          userAgent: ua,
+          platform: navigator.platform,
+          languages: navigator.languages,
+          language: navigator.language,
+          hardwareConcurrency: navigator.hardwareConcurrency,
+          deviceMemory: navigator.deviceMemory,
+          webdriver: navigator.webdriver,
+          maxTouchPoints: navigator.maxTouchPoints,
+          pdfViewerEnabled: navigator.pdfViewerEnabled,
+          doNotTrack: navigator.doNotTrack,
+          brands: userAgentData && userAgentData.brands,
+          mobile: userAgentData && userAgentData.mobile,
+          highEntropy,
+          plugins,
+          mimeTypes,
+          descriptorNames: descriptors,
+          suspicious: {
+            webdriver: navigator.webdriver === true,
+            noLanguages: !navigator.languages || navigator.languages.length === 0,
+            noPluginsOnDesktop: !firefoxLike && !safariLike && plugins.length === 0,
+            uaDataMismatch
+          }
+        };
+      };
+
+      const getScreenReport = () => {
+        let touch = false;
+        try {
+          touch = "ontouchstart" in window && !!document.createEvent("TouchEvent");
+        } catch {
+          touch = false;
+        }
+        const details = {
+          width: screen.width,
+          height: screen.height,
+          availWidth: screen.availWidth,
+          availHeight: screen.availHeight,
+          colorDepth: screen.colorDepth,
+          pixelDepth: screen.pixelDepth,
+          devicePixelRatio,
+          innerWidth,
+          innerHeight,
+          outerWidth,
+          outerHeight,
+          taskbarHeight: screen.height - screen.availHeight,
+          resolution: {
+            width: screen.width * devicePixelRatio,
+            height: screen.height * devicePixelRatio
+          },
+          orientation: screen.orientation && screen.orientation.type,
+          touch,
+          visualViewport: window.visualViewport
+            ? {
+                width: window.visualViewport.width,
+                height: window.visualViewport.height,
+                scale: window.visualViewport.scale
+              }
+            : null
+        };
+        const impossible =
+          details.width <= 0 ||
+          details.height <= 0 ||
+          details.availWidth <= 0 ||
+          details.availHeight <= 0 ||
+          details.availWidth > details.width ||
+          details.availHeight > details.height ||
+          details.colorDepth !== details.pixelDepth;
+        return { ...details, impossible };
+      };
+
+      const getSystemColorsReport = () => {
+        const names = {
+          AccentColor: "ac",
+          AccentColorText: "act",
+          ActiveText: "at",
+          ButtonFace: "bf",
+          ButtonText: "bt",
+          Canvas: "c",
+          CanvasText: "ct",
+          Field: "f",
+          FieldText: "ft",
+          GrayText: "gt",
+          Highlight: "h",
+          HighlightText: "ht",
+          LinkText: "lt",
+          Mark: "m",
+          MarkText: "mt",
+          VisitedText: "vt",
+          Window: "w",
+          WindowText: "wt"
+        };
+        const element = document.createElement("div");
+        document.body.appendChild(element);
+        const colors = {};
+        for (const [name, alias] of Object.entries(names)) {
+          element.style.color = name;
+          colors[alias] = getComputedStyle(element).color;
+        }
+        element.remove();
+        const values = Object.values(colors);
+        return {
+          colors,
+          hash: hashString(JSON.stringify(colors)),
+          uniqueCount: new Set(values).size,
+          suspicious: values.some((value) => !/^rgba?\(/.test(String(value)))
+        };
+      };
+
+      const getEmojiCanvasAverageReport = async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 50;
+        canvas.height = 40;
+        canvas.style.display = "none";
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "black";
+        ctx.font = "14pt no-real-font-123";
+        ctx.fillText("👽", 12, 30);
+        const dataUrl = canvas.toDataURL("image/png");
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const sums = [0, 0, 0, 0];
+        for (let i = 0; i < pixels.length; i += 4) {
+          sums[0] += pixels[i];
+          sums[1] += pixels[i + 1];
+          sums[2] += pixels[i + 2];
+          sums[3] += pixels[i + 3];
+        }
+        const total = canvas.width * canvas.height;
+        const subtleAvailable = !!(window.crypto && crypto.subtle && crypto.subtle.digest);
+        const digest = subtleAvailable ? await crypto.subtle.digest("SHA-256", new TextEncoder().encode(dataUrl)) : null;
+        return {
+          hash: digest
+            ? Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("")
+            : String(hashString(dataUrl)),
+          dataUrlHash: hashString(dataUrl),
+          subtleAvailable,
+          averageRed: sums[0] / total,
+          averageGreen: sums[1] / total,
+          averageBlue: sums[2] / total,
+          averageAlpha: sums[3] / total,
+          suspicious: false
+        };
+      };
+
+      const getScaledGlyphHistogramReport = () => {
+        const source = document.createElement("canvas");
+        source.width = 100;
+        source.height = 20;
+        const sourceCtx = source.getContext("2d");
+        sourceCtx.font = "14px Arial";
+        sourceCtx.fillStyle = "#111";
+        sourceCtx.fillText("龘", 0, 16);
+
+        const target = document.createElement("canvas");
+        target.width = 400;
+        target.height = 80;
+        const targetCtx = target.getContext("2d");
+        targetCtx.imageSmoothingEnabled = false;
+        targetCtx.drawImage(source, 0, 0, 100, 20, 0, 0, 400, 80);
+        const data = targetCtx.getImageData(0, 0, target.width, target.height).data;
+        const colors = new Map();
+        for (let i = 0; i < data.length; i += 4) {
+          const color = `rgba(${data[i]}, ${data[i + 1]}, ${data[i + 2]}, ${data[i + 3]})`;
+          colors.set(color, (colors.get(color) || 0) + 1);
+        }
+        const topColors = Array.from(colors.entries())
+          .map(([color, count]) => ({ color, count, percentage: Number(((count / (target.width * target.height)) * 100).toFixed(2)) }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 12);
+        return {
+          uniqueColors: colors.size,
+          topColors,
+          hash: hashString(JSON.stringify(topColors)),
+          suspicious: colors.size <= 1
+        };
+      };
+
+      const getTimezoneReport = () => {
+        const now = new Date();
+        const jan = new Date(now.getFullYear(), 0, 1);
+        const jul = new Date(now.getFullYear(), 6, 1);
+        const intl = Intl.DateTimeFormat().resolvedOptions();
+        const offsetNow = now.getTimezoneOffset();
+        const offsetJan = jan.getTimezoneOffset();
+        const offsetJul = jul.getTimezoneOffset();
+        const gmtMatch = String(now).match(/GMT([+-]\d{4})/);
+        const gmtMinutes = gmtMatch ? -1 * (Number(gmtMatch[1].slice(0, 3)) * 60 + Number(gmtMatch[1].slice(0, 1) + gmtMatch[1].slice(3))) : null;
+        return {
+          timeZone: intl.timeZone,
+          locale: intl.locale,
+          offsetNow,
+          offsetJan,
+          offsetJul,
+          dateString: String(now),
+          gmtMinutes,
+          suspicious: {
+            missingTimeZone: !intl.timeZone,
+            gmtOffsetMismatch: typeof gmtMinutes === "number" && gmtMinutes !== offsetNow,
+            invalidOffsets: [offsetNow, offsetJan, offsetJul].some((value) => !Number.isFinite(value) || Math.abs(value) > 14 * 60)
+          }
+        };
+      };
+
+      const getPermissionsReport = async () => {
+        if (!navigator.permissions || !navigator.permissions.query) {
+          return { unsupported: true, entries: [] };
+        }
+        const names = ["geolocation", "notifications", "camera", "microphone", "clipboard-read", "persistent-storage"];
+        const entries = [];
+        for (const name of names) {
+          try {
+            const status = await navigator.permissions.query({ name });
+            entries.push({ name, state: status.state });
+          } catch (error) {
+            entries.push({ name, error: String((error && error.message) || error) });
+          }
+        }
+        return { unsupported: false, entries };
+      };
+
+      const getRuntimeEnumerationReport = () => {
+        const descriptorKeys = (value) => {
+          try {
+            return Object.keys(Object.getOwnPropertyDescriptors(value || {})).sort();
+          } catch {
+            return [];
+          }
+        };
+        const ownKeys = (value) => {
+          try {
+            return Object.keys(value || {}).sort();
+          } catch {
+            return [];
+          }
+        };
+        const windowKeys = Object.getOwnPropertyNames(window).filter((key) => !/^_|^\d/.test(key));
+        const documentData = {
+          characterSet: document.characterSet,
+          compatMode: document.compatMode,
+          documentMode: document.documentMode,
+          layersType: Object.prototype.toString.call(document.layers),
+          allType: Object.prototype.toString.call(document.all),
+          imagesType: Object.prototype.toString.call(document.images),
+          referrer: document.referrer
+        };
+        return {
+          objectKeys: {
+            navigator: ownKeys(navigator),
+            screen: ownKeys(screen),
+            windowCount: windowKeys.length
+          },
+          descriptorKeys: {
+            navigator: descriptorKeys(Navigator.prototype),
+            screen: descriptorKeys(Screen.prototype)
+          },
+          documentData,
+          suspicious: {
+            navigatorOwnKeys: ownKeys(navigator).length > 0,
+            screenOwnKeys: ownKeys(screen).length > 0,
+            windowTooSmall: windowKeys.length < 100,
+            missingDocumentCharset: !document.characterSet
+          }
+        };
+      };
+
+      const getBatteryReport = async () => {
+        if (!navigator.getBattery) return { unsupported: true };
+        try {
+          const battery = await navigator.getBattery();
+          return {
+            unsupported: false,
+            charging: battery.charging,
+            level: Math.round(battery.level * 100),
+            chargingTime: battery.chargingTime,
+            dischargingTime: battery.dischargingTime,
+            suspicious: {
+              invalidLevel: battery.level < 0 || battery.level > 1,
+              invalidTimes: battery.chargingTime < 0 || battery.dischargingTime < 0
+            }
+          };
+        } catch (error) {
+          return { unsupported: false, error: String((error && error.message) || error), suspicious: { exception: true } };
+        }
+      };
+
+      const getNetworkReport = () => {
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (!connection) return { unsupported: true };
+        const details = {
+          effectiveType: connection.effectiveType,
+          rtt: connection.rtt,
+          downlink: connection.downlink,
+          saveData: connection.saveData,
+          type: connection.type
+        };
+        return {
+          unsupported: false,
+          ...details,
+          suspicious: {
+            invalidRtt: typeof details.rtt === "number" && details.rtt < 0,
+            invalidDownlink: typeof details.downlink === "number" && details.downlink < 0
+          }
+        };
+      };
+
+      const getMediaDevicesReport = async () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+          return { unsupported: true };
+        }
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          return {
+            unsupported: false,
+            count: devices.length,
+            kinds: devices.map((device) => device.kind),
+            idsPresent: devices.filter((device) => device.deviceId).length,
+            labelsPresent: devices.filter((device) => device.label).length,
+            suspicious: {
+              duplicateIds: new Set(devices.map((device) => device.deviceId).filter(Boolean)).size < devices.filter((device) => device.deviceId).length
+            }
+          };
+        } catch (error) {
+          return { unsupported: false, error: String((error && error.message) || error), suspicious: { exception: true } };
+        }
+      };
+
+      const getWebRTCReport = async () => {
+        const Ctor = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
+        if (!Ctor) return { unsupported: true };
+        const pc = new Ctor({ iceServers: [] });
+        const candidates = [];
+        try {
+          pc.createDataChannel("probe");
+          pc.onicecandidate = (event) => {
+            if (event.candidate) candidates.push(event.candidate.candidate);
+          };
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          return {
+            unsupported: false,
+            candidateCount: candidates.length,
+            hostCandidates: candidates.filter((candidate) => /\bhost\b/.test(candidate)).length,
+            native: isNativeFunction(Ctor),
+            suspicious: {
+              constructorHooked: !isNativeFunction(Ctor),
+              malformedCandidate: candidates.some((candidate) => !/^candidate:/.test(candidate))
+            }
+          };
+        } catch (error) {
+          return { unsupported: false, error: String((error && error.message) || error), suspicious: { exception: true } };
+        } finally {
+          pc.close();
+        }
+      };
+
+      const getPerformanceTimingReport = () => {
+        const timing = performance.timing;
+        if (!timing) return { unsupported: true };
+        const fields = [
+          "navigationStart",
+          "fetchStart",
+          "domainLookupStart",
+          "domainLookupEnd",
+          "connectStart",
+          "connectEnd",
+          "requestStart",
+          "responseStart",
+          "responseEnd",
+          "domLoading",
+          "domComplete",
+          "loadEventEnd"
+        ];
+        const values = Object.fromEntries(fields.map((field) => [field, timing[field]]));
+        return {
+          unsupported: false,
+          values,
+          suspicious: {
+            negativeOrder: fields.some((field, index) => index > 0 && values[field] && values[fields[index - 1]] && values[field] < values[fields[index - 1]]),
+            allZero: fields.every((field) => !values[field])
+          }
+        };
+      };
+
+      const getStoragePrivacyReport = async () => {
+        const storageResults = {};
+        for (const [name, storage] of [
+          ["localStorage", window.localStorage],
+          ["sessionStorage", window.sessionStorage]
+        ]) {
+          try {
+            const key = "__brosdk_fp_storage_probe__";
+            storage.setItem(key, "1");
+            const value = storage.getItem(key);
+            storage.removeItem(key);
+            storageResults[name] = { available: true, roundTrip: value === "1", length: storage.length };
+          } catch (error) {
+            storageResults[name] = { available: false, error: String((error && error.message) || error) };
+          }
+        }
+
+        let estimate = null;
+        if (navigator.storage && navigator.storage.estimate) {
+          try {
+            estimate = await navigator.storage.estimate();
+          } catch (error) {
+            estimate = { error: String((error && error.message) || error) };
+          }
+        }
+
+        let indexedDBReport = null;
+        try {
+          indexedDBReport = { available: !!window.indexedDB, native: window.indexedDB ? isNativeFunction(indexedDB.open) : null };
+        } catch (error) {
+          indexedDBReport = { error: String((error && error.message) || error) };
+        }
+
+        const requestFileSystem = window.requestFileSystem || window.webkitRequestFileSystem;
+        return {
+          storageResults,
+          estimate,
+          indexedDB: indexedDBReport,
+          requestFileSystemType: typeof requestFileSystem,
+          suspicious: {
+            storageBlocked: Object.values(storageResults).some((entry) => !entry.available),
+            storageRoundTripFailed: Object.values(storageResults).some((entry) => entry.available && !entry.roundTrip),
+            invalidQuota:
+              estimate &&
+              typeof estimate.quota === "number" &&
+              typeof estimate.usage === "number" &&
+              (estimate.quota < 0 || estimate.usage < 0 || estimate.usage > estimate.quota)
+          }
+        };
+      };
+
+      const getCSSFeatureReport = () => {
+        const probes = [
+          ["color-gamut-p3", "(color-gamut: p3)"],
+          ["forced-colors", "(forced-colors: active)"],
+          ["prefers-contrast", "(prefers-contrast: more)"],
+          ["dynamic-range", "(dynamic-range: high)"]
+        ];
+        const media = Object.fromEntries(
+          probes.map(([name, query]) => {
+            try {
+              return [name, matchMedia(query).matches];
+            } catch (error) {
+              return [name, { error: String((error && error.message) || error) }];
+            }
+          })
+        );
+        const supports = {
+          selectorHas: CSS.supports && CSS.supports("selector(:has(*))"),
+          fontTechColor: CSS.supports && CSS.supports("font-tech(color-COLRv1)"),
+          colorDisplayP3: CSS.supports && CSS.supports("color", "color(display-p3 1 0 0)")
+        };
+        const bodyStyle = getComputedStyle(document.body);
+        const cssKeys = Object.keys(bodyStyle).filter((key) => Number.isNaN(Number(key)));
+        return {
+          media,
+          supports,
+          cssStyleKeyCount: cssKeys.length,
+          cssStyleSample: cssKeys.slice(0, 24),
+          suspicious: {
+            emptyStyleKeys: cssKeys.length === 0,
+            missingCSSSupports: typeof CSS === "undefined" || typeof CSS.supports !== "function"
+          }
+        };
+      };
+
+      const renderOfflineAudio = async () => {
+        const Ctor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        if (!Ctor) return { unsupported: true };
+        const context = new Ctor(1, 44100, 44100);
+        const oscillator = context.createOscillator();
+        const compressor = context.createDynamicsCompressor();
+        oscillator.type = "triangle";
+        oscillator.frequency.value = 10000;
+        compressor.threshold.value = -50;
+        compressor.knee.value = 40;
+        compressor.ratio.value = 12;
+        compressor.attack.value = 0;
+        compressor.release.value = 0.25;
+        oscillator.connect(compressor);
+        compressor.connect(context.destination);
+        oscillator.start(0);
+        const buffer = await context.startRendering();
+        const data = buffer.getChannelData(0);
+        const sample = new Float32Array(128);
+        for (let i = 0; i < sample.length; i++) sample[i] = data[i * 64] || 0;
+        return {
+          unsupported: false,
+          length: data.length,
+          sampleRate: buffer.sampleRate,
+          hash: hashBytes(new Uint8Array(sample.buffer)),
+          firstValues: Array.from(sample.slice(0, 12)).map((value) => Number(value.toFixed(8)))
+        };
+      };
+
+      const getAudioReport = async () => {
+        try {
+          const first = await renderOfflineAudio();
+          const second = await renderOfflineAudio();
+          const nativeFlags = getNativeSurfaceFlags().filter((flag) => flag.startsWith("Audio") || flag.startsWith("Offline"));
+          return {
+            first,
+            second,
+            stable: first.unsupported || first.hash === second.hash,
+            nativeFlags,
+            suspicious: !first.unsupported && first.hash !== second.hash
+          };
+        } catch (error) {
+          return { error: String((error && error.message) || error), suspicious: true };
+        }
+      };
+
+      const getWebGLContext = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 32;
+        canvas.height = 32;
+        return (
+          canvas.getContext("webgl2", { preserveDrawingBuffer: true }) ||
+          canvas.getContext("webgl", { preserveDrawingBuffer: true }) ||
+          canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true })
+        );
+      };
+
+      const readWebGLPixels = (gl) => {
+        gl.clearColor(0.15, 0.35, 0.65, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        const pixels = new Uint8Array(32 * 32 * 4);
+        gl.readPixels(0, 0, 32, 32, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        return pixels;
+      };
+
+      const getWebGLReport = () => {
+        try {
+          const gl = getWebGLContext();
+          if (!gl) return { unsupported: true };
+          const ext = gl.getExtension("WEBGL_debug_renderer_info");
+          const pixelsA = readWebGLPixels(gl);
+          const pixelsB = readWebGLPixels(gl);
+          const supportedExtensions = gl.getSupportedExtensions() || [];
+          const precision = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+          const details = {
+            unsupported: false,
+            version: gl.getParameter(gl.VERSION),
+            shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+            vendor: gl.getParameter(gl.VENDOR),
+            renderer: gl.getParameter(gl.RENDERER),
+            unmaskedVendor: ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : null,
+            unmaskedRenderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null,
+            maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+            maxViewportDims: Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS) || []),
+            aliasedLineWidthRange: Array.from(gl.getParameter(gl.ALIASED_LINE_WIDTH_RANGE) || []),
+            extensionsHash: hashString(supportedExtensions.join("|")),
+            extensionsCount: supportedExtensions.length,
+            precision: precision
+              ? { rangeMin: precision.rangeMin, rangeMax: precision.rangeMax, precision: precision.precision }
+              : null,
+            readPixelsA: hashBytes(pixelsA),
+            readPixelsB: hashBytes(pixelsB),
+            readPixelsStable: hashBytes(pixelsA) === hashBytes(pixelsB)
+          };
+          return {
+            ...details,
+            suspicious: {
+              readPixelsUnstable: !details.readPixelsStable,
+              missingRenderer: !details.renderer,
+              missingExtensions: supportedExtensions.length === 0,
+              nativeFlags: getNativeSurfaceFlags().filter((flag) => flag.startsWith("WebGL"))
+            }
+          };
+        } catch (error) {
+          return { error: String((error && error.message) || error), suspicious: { exception: true } };
+        }
+      };
+
+      const getWebGPUReport = async () => {
+        if (!navigator.gpu || !navigator.gpu.requestAdapter) return { unsupported: true };
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter) return { unsupported: false, adapter: null };
+          const features = adapter.features ? Array.from(adapter.features).sort() : [];
+          const limits = adapter.limits
+            ? Object.fromEntries(
+                Object.keys(adapter.limits)
+                  .sort()
+                  .map((key) => [key, adapter.limits[key]])
+              )
+            : {};
+          return {
+            unsupported: false,
+            adapter: {
+              features,
+              limits,
+              info: adapter.info || null
+            },
+            requestAdapterNative: isNativeFunction(navigator.gpu.requestAdapter),
+            suspicious: {
+              requestAdapterHooked: !isNativeFunction(navigator.gpu.requestAdapter),
+              emptyFeaturesAndLimits: features.length === 0 && Object.keys(limits).length === 0
+            }
+          };
+        } catch (error) {
+          return { unsupported: false, error: String((error && error.message) || error), suspicious: { exception: true } };
+        }
+      };
+
+      const getFontReport = async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 600;
+        canvas.height = 80;
+        const ctx = canvas.getContext("2d");
+        const text = "mmmmmmmmmlli WW 123 漢字 emoji";
+        const baseFonts = ["monospace", "serif", "sans-serif"];
+        const candidates = [
+          "Arial",
+          "Calibri",
+          "Cambria",
+          "Consolas",
+          "Courier New",
+          "Georgia",
+          "Segoe UI",
+          "Times New Roman",
+          "Verdana",
+          "Microsoft YaHei",
+          "SimSun",
+          "Noto Sans CJK SC",
+          "Apple Color Emoji"
+        ];
+
+        const measure = (font) => {
+          ctx.font = "32px " + font;
+          return Number(ctx.measureText(text).width.toFixed(3));
+        };
+
+        const bases = Object.fromEntries(baseFonts.map((font) => [font, measure(font)]));
+        const detected = candidates.map((font) => {
+          const widths = baseFonts.map((base) => measure('"' + font + '",' + base));
+          return {
+            font,
+            widths,
+            differsFromBase: widths.some((width, index) => width !== bases[baseFonts[index]])
+          };
+        });
+
+        let fontFaceLocal = null;
+        if (window.FontFace) {
+          try {
+            const face = new FontFace("BrosdkLocalProbe", 'local("Arial")');
+            fontFaceLocal = { status: face.status, native: isNativeFunction(FontFace) };
+          } catch (error) {
+            fontFaceLocal = { error: String((error && error.message) || error) };
+          }
+        }
+
+        let localFontFamilies = null;
+        if (window.queryLocalFonts) {
+          try {
+            const localFonts = await Promise.race([
+              window.queryLocalFonts(),
+              new Promise((resolve) => setTimeout(() => resolve(null), 1200))
+            ]);
+            localFontFamilies = Array.isArray(localFonts)
+              ? {
+                  count: localFonts.length,
+                  sample: localFonts.slice(0, 8).map((font) => font.family || font.fullName || font.postscriptName || "")
+                }
+              : { timeout: true };
+          } catch (error) {
+            localFontFamilies = { error: String((error && error.message) || error) };
+          }
+        }
+
+        return {
+          documentFontsSupported: !!document.fonts,
+          documentFontsReady: document.fonts && document.fonts.ready ? await Promise.race([document.fonts.ready.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 500))]) : null,
+          bases,
+          detected,
+          detectedCount: detected.filter((entry) => entry.differsFromBase).length,
+          fontFaceLocal,
+          localFontFamilies,
+          suspicious: {
+            measureTextHooked: !isNativeFunction(CanvasRenderingContext2D.prototype.measureText),
+            fontFaceHooked: window.FontFace && !isNativeFunction(FontFace),
+            queryLocalFontsHooked: window.queryLocalFonts && !isNativeFunction(window.queryLocalFonts)
+          }
+        };
+      };
+
+      const renderResults = () => {
+        const failed = checks.filter((check) => check.failed);
+        const summary = document.getElementById("summary");
+        summary.className = "summary " + (failed.length ? "fail" : "pass");
+        summary.textContent = failed.length
+          ? "Fingerprint surface abnormal: " + failed.length + " suspicious checks failed"
+          : "Fingerprint surfaces look normal under this probe";
+
+        const tbody = document.getElementById("checks");
+        tbody.textContent = "";
+        for (const check of checks) {
+          const tr = document.createElement("tr");
+          const name = document.createElement("td");
+          const status = document.createElement("td");
+          const details = document.createElement("td");
+          name.textContent = check.name;
+          status.textContent = check.failed ? "FAIL" : "PASS";
+          status.className = check.failed ? "fail-text" : "pass-text";
+          details.textContent = JSON.stringify(check.details, null, 2);
+          tr.append(name, status, details);
+          tbody.append(tr);
+        }
+
+        document.getElementById("raw").textContent = JSON.stringify(
+          {
+            fingerprintSurfaceAbnormal: failed.length > 0,
+            failed: failed.map((check) => check.name),
+            checks
+          },
+          null,
+          2
+        );
+      };
+
+      const run = async () => {
+        const clean = createCleanRealm();
+        try {
+          const localToStringSource = Function.prototype.toString.call(Function.prototype.toString);
+          const cleanToStringSource = clean.win.Function.prototype.toString.call(clean.win.Function.prototype.toString);
+          addCheck(
+            "native toString realm match",
+            localToStringSource !== cleanToStringSource,
+            { localHash: hashString(localToStringSource), cleanHash: hashString(cleanToStringSource) },
+            "high"
+          );
+
+          const snapshotResults = compareSnapshot();
+          const snapshotMismatches = snapshotResults.filter((result) => !result.same);
+          addCheck("early native snapshot", snapshotMismatches.length > 0, { mismatches: snapshotMismatches, all: snapshotResults }, "high");
+
+          const nativeFlags = getNativeSurfaceFlags();
+          addCheck("native function surface", nativeFlags.length > 0, { flags: nativeFlags }, "high");
+
+          const proxyFlags = getProxySurfaceFlags();
+          addCheck("proxy stack surface", proxyFlags.length > 0, { flags: proxyFlags }, "high");
+
+          const navigatorReport = await withTimeout(getNavigatorReport(), 1500, {
+            timeout: true,
+            suspicious: { timeout: true }
+          });
+          addCheck(
+            "navigator consistency",
+            Object.values(navigatorReport.suspicious).some(Boolean),
+            navigatorReport,
+            "medium"
+          );
+
+          const screenReport = getScreenReport();
+          addCheck("screen consistency", screenReport.impossible, screenReport, "medium");
+
+          const systemColorsReport = getSystemColorsReport();
+          addCheck("system colors surface", systemColorsReport.suspicious, systemColorsReport, "medium");
+
+          const timezoneReport = getTimezoneReport();
+          addCheck(
+            "timezone consistency",
+            Object.values(timezoneReport.suspicious).some(Boolean),
+            timezoneReport,
+            "medium"
+          );
+
+          const permissionsReport = await withTimeout(getPermissionsReport(), 1500, {
+            timeout: true,
+            entries: []
+          });
+          addCheck(
+            "permissions surface",
+            false,
+            permissionsReport,
+            "info"
+          );
+
+          const runtimeEnumerationReport = getRuntimeEnumerationReport();
+          addCheck(
+            "runtime window/navigator enumeration",
+            Object.values(runtimeEnumerationReport.suspicious).some(Boolean),
+            runtimeEnumerationReport,
+            "medium"
+          );
+
+          const batteryReport = await withTimeout(getBatteryReport(), 1500, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck("battery surface", batteryReport.suspicious && Object.values(batteryReport.suspicious).some(Boolean), batteryReport, "medium");
+
+          const networkReport = getNetworkReport();
+          addCheck("network information surface", networkReport.suspicious && Object.values(networkReport.suspicious).some(Boolean), networkReport, "medium");
+
+          const mediaDevicesReport = await withTimeout(getMediaDevicesReport(), 2000, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck(
+            "media devices surface",
+            mediaDevicesReport.suspicious && Object.values(mediaDevicesReport.suspicious).some(Boolean),
+            mediaDevicesReport,
+            "medium"
+          );
+
+          const webRTCReport = await withTimeout(getWebRTCReport(), 2500, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck("webrtc candidate surface", webRTCReport.suspicious && Object.values(webRTCReport.suspicious).some(Boolean), webRTCReport, "medium");
+
+          const performanceTimingReport = getPerformanceTimingReport();
+          addCheck(
+            "performance timing surface",
+            performanceTimingReport.suspicious && Object.values(performanceTimingReport.suspicious).some(Boolean),
+            performanceTimingReport,
+            "medium"
+          );
+
+          const storagePrivacyReport = await withTimeout(getStoragePrivacyReport(), 2200, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck(
+            "storage privacy-mode surface",
+            storagePrivacyReport.suspicious && Object.values(storagePrivacyReport.suspicious).some(Boolean),
+            storagePrivacyReport,
+            "medium"
+          );
+
+          const cssFeatureReport = getCSSFeatureReport();
+          addCheck(
+            "css feature surface",
+            cssFeatureReport.suspicious && Object.values(cssFeatureReport.suspicious).some(Boolean),
+            cssFeatureReport,
+            "medium"
+          );
+
+          const audioReport = await withTimeout(getAudioReport(), 2500, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck("audio offline stability", audioReport.suspicious, audioReport, "high");
+
+          const webglReport = getWebGLReport();
+          addCheck(
+            "webgl consistency",
+            webglReport.suspicious && Object.values(webglReport.suspicious).flat().some(Boolean),
+            webglReport,
+            "high"
+          );
+
+          const webgpuReport = await withTimeout(getWebGPUReport(), 2000, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck(
+            "webgpu capability surface",
+            webgpuReport.suspicious && Object.values(webgpuReport.suspicious).some(Boolean),
+            webgpuReport,
+            "medium"
+          );
+
+          const fontReport = await withTimeout(getFontReport(), 2000, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck(
+            "font probing surface",
+            Object.values(fontReport.suspicious).some(Boolean),
+            fontReport,
+            "medium"
+          );
+
+          const emojiCanvas = await withTimeout(getEmojiCanvasAverageReport(), 1500, {
+            timeout: true,
+            suspicious: false
+          });
+          addCheck("emoji canvas average surface", emojiCanvas.suspicious, emojiCanvas, "medium");
+
+          const scaledGlyphHistogram = getScaledGlyphHistogramReport();
+          addCheck("scaled glyph color histogram", scaledGlyphHistogram.suspicious, scaledGlyphHistogram, "medium");
+        } catch (error) {
+          addCheck("runner exception", true, { message: error && error.message, stack: error && error.stack }, "high");
+        } finally {
+          clean.dispose();
+          renderResults();
+        }
+      };
+
+      run();
+    </script>
+  </body>
+</html>

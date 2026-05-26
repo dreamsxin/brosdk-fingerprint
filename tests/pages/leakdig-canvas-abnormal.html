@@ -3,6 +3,52 @@
   <head>
     <meta charset="utf-8" />
     <title>Leakdig Style Canvas Abnormal Detection</title>
+    <script>
+      (function snapshotOriginalFunctions() {
+        function getFromPath(path, root) {
+          return path.split(".").reduce(function (value, key) {
+            return value == null ? undefined : value[key];
+          }, root || window);
+        }
+
+        var paths = [
+          "Function",
+          "Object.keys",
+          "Navigator",
+          "navigator.userAgent",
+          "window.setInterval",
+          "window.setTimeout",
+          "window.localStorage.getItem",
+          "window.localStorage.setItem",
+          "window.sessionStorage.getItem",
+          "window.sessionStorage.setItem",
+          "Object.getOwnPropertyDescriptor",
+          "Object.getOwnPropertyNames",
+          "Object.defineProperty",
+          "String.prototype.includes",
+          "Array.prototype.includes",
+          "Document.prototype.getElementById",
+          "Document.prototype.createElement",
+          "HTMLCanvasElement.prototype.toDataURL",
+          "HTMLCanvasElement.prototype.getContext",
+          "CanvasRenderingContext2D.prototype.getImageData",
+          "CanvasRenderingContext2D.prototype.fillText",
+          "CanvasRenderingContext2D.prototype.drawImage",
+          "OfflineAudioContext.prototype.createAnalyser",
+          "WebGLRenderingContext.prototype.getParameter",
+          "WebGLRenderingContext.prototype.bufferData",
+          "WebGLRenderingContext.prototype.getExtension",
+          "Function.prototype.toString"
+        ];
+
+        window.__leakdigOriginalFunctions = Object.freeze(
+          paths.reduce(function (snapshot, path) {
+            snapshot[btoa(path)] = getFromPath(path);
+            return snapshot;
+          }, {})
+        );
+      })();
+    </script>
     <style>
       :root {
         color-scheme: light dark;
@@ -127,6 +173,80 @@
         return h >>> 0;
       };
 
+      const canvasRect = { x: 0, y: 0, width: 260, height: 30 };
+
+      const isChromeLike = () => /\bChrome\/|Chromium\/|Edg\//.test(navigator.userAgent);
+      const isFirefoxLike = () => /\bFirefox\//.test(navigator.userAgent);
+      const isSafariLike = () => /\bSafari\//.test(navigator.userAgent) && !isChromeLike();
+      const isBlinkLike = () => typeof chrome !== "undefined" || isChromeLike();
+
+      const hashUint = (value) => {
+        if (!value) return 0;
+        let h = 0xb00bface;
+        for (let i = 0; i < 32; i++) {
+          h = (0x1003f * h) ^ value.charCodeAt(h % value.length);
+          h >>>= 0;
+        }
+        return h >>> 0;
+      };
+
+      const getHistogramBins = (data) => {
+        const bins = new Array(256).fill(0);
+        for (let i = 0; i < data.length; i++) bins[data[i]]++;
+        return bins;
+      };
+
+      const hasGPURenderer = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const gl = canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+          if (!gl) return { available: false, renderer: null, isSoftware: false };
+          const ext = gl.getExtension("WEBGL_debug_renderer_info");
+          if (!ext) return { available: false, renderer: null, isSoftware: false };
+          const renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+          return {
+            available: !!renderer,
+            renderer,
+            isSoftware: /SwiftShader|llvmpipe|softpipe|Microsoft Basic Render Driver/i.test(String(renderer))
+          };
+        } catch {
+          return { available: false, renderer: null, isSoftware: false };
+        }
+      };
+
+      const isNativeFunction = (fn) => {
+        try {
+          return /\s*\(\)\s*\{\s*\[\s*native\s+code\s*\]\s*\}/.test(Function.prototype.toString.call(fn));
+        } catch {
+          return false;
+        }
+      };
+
+      const getFromPath = (path, root = window) => {
+        return path.split(".").reduce((value, key) => (value == null ? undefined : value[key]), root);
+      };
+
+      const compareData = (left, right) => {
+        if (!left || !right || left.length !== right.length) return false;
+        for (let i = 0; i < left.length; i++) {
+          if (left[i] !== right[i]) return false;
+        }
+        return true;
+      };
+
+      const getPixelDiffSummary = (left, right) => {
+        let count = 0;
+        let maxDelta = 0;
+        for (let i = 0; i < left.length && i < right.length; i++) {
+          const delta = Math.abs(left[i] - right[i]);
+          if (delta > 0) {
+            count++;
+            if (delta > maxDelta) maxDelta = delta;
+          }
+        }
+        return { count, maxDelta };
+      };
+
       const stringifyDescriptor = (descriptor) => {
         if (!descriptor) return "missing";
         const copy = {};
@@ -157,6 +277,150 @@
         );
       };
 
+      const getSnapshotComparisonLikeLeakdig = () => {
+        const snapshot = window.__leakdigOriginalFunctions;
+        if (!snapshot) return [{ path: "snapshot", same: false, currentType: "missing", originalType: "missing" }];
+        const results = [];
+        for (const encodedPath in snapshot) {
+          const path = atob(encodedPath);
+          const originalValue = snapshot[encodedPath];
+          const currentValue = getFromPath(path);
+          results.push({
+            path,
+            same: originalValue === currentValue,
+            currentType: typeof currentValue,
+            originalType: typeof originalValue
+          });
+        }
+        return results;
+      };
+
+      const getNavigatorKeysLikeLeakdig = () => {
+        try {
+          return Object.keys(window.navigator || {});
+        } catch {
+          return [];
+        }
+      };
+
+      const getScreenKeysLikeLeakdig = () => {
+        try {
+          return Object.keys(window.screen || {});
+        } catch {
+          return [];
+        }
+      };
+
+      const getPluginToStringLikeLeakdig = () => {
+        try {
+          const value = navigator.plugins.toString() || "";
+          return value.replace(/\s+/g, "").slice(0, 60);
+        } catch (error) {
+          return "error:" + String((error && error.message) || error);
+        }
+      };
+
+      const getEvalFunctionLengthLikeLeakdig = () => {
+        try {
+          return eval.toString().length;
+        } catch {
+          return -1;
+        }
+      };
+
+      const checkSupportCanvasContext2DLikeLeakdig = () => {
+        try {
+          return !!document.createElement("canvas").getContext("2d");
+        } catch {
+          return false;
+        }
+      };
+
+      const checkSupportCanvasFillTextLikeLeakdig = () => {
+        try {
+          const ctx = document.createElement("canvas").getContext("2d");
+          return typeof ctx.fillText === "function";
+        } catch {
+          return false;
+        }
+      };
+
+      const checkSupportCanvasToDataURLLikeLeakdig = () => {
+        try {
+          return typeof document.createElement("canvas").toDataURL === "function";
+        } catch {
+          return false;
+        }
+      };
+
+      const checkSupportOffscreenCanvasLikeLeakdig = () => {
+        return typeof OffscreenCanvas !== "undefined";
+      };
+
+      const windowLengthHookLikeLeakdig = () => {
+        try {
+          return window.frames.length !== parent.frames.length;
+        } catch {
+          return true;
+        }
+      };
+
+      const windowSelfTopHookLikeLeakdig = () => {
+        try {
+          return window.self !== window.top;
+        } catch {
+          return true;
+        }
+      };
+
+      const windowSelfTopLoopHookLikeLeakdig = () => {
+        try {
+          let current = window;
+          for (let i = 0; i < 15; i++) {
+            current = current.parent;
+            if (current !== window.self) return true;
+          }
+          return false;
+        } catch {
+          return true;
+        }
+      };
+
+      const windowHookLikeLeakdig = () => {
+        return {
+          length: windowLengthHookLikeLeakdig(),
+          selfTop: windowSelfTopHookLikeLeakdig(),
+          selfTopLoop: windowSelfTopLoopHookLikeLeakdig()
+        };
+      };
+
+      const checkWebglInfoHookLikeLeakdig = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const gl =
+            canvas.getContext("webgl2") ||
+            canvas.getContext("experimental-webgl2") ||
+            canvas.getContext("webgl") ||
+            canvas.getContext("experimental-webgl") ||
+            canvas.getContext("moz-webgl");
+          if (!gl) return { suspicious: false, score: "-", reason: "no-webgl" };
+          const ext = gl.getExtension("WEBGL_debug_renderer_info");
+          if (!ext) return { suspicious: false, score: "-", reason: "no-debug-renderer-info" };
+          const rendererParam = ext.UNMASKED_RENDERER_WEBGL;
+          const started = performance.now();
+          let calls = 0;
+          while (performance.now() - started < 5) {
+            for (let i = 0; i < 10; i++) gl.getParameter(rendererParam);
+            calls += 10;
+          }
+          const elapsed = performance.now() - started;
+          const score = Math.round(calls / elapsed);
+          return { suspicious: score > 100, score, elapsed: Number(elapsed.toFixed(3)), calls };
+        } catch (error) {
+          return { suspicious: false, score: "-", reason: String((error && error.message) || error) };
+        }
+      };
+
       const createCleanRealm = () => {
         const iframe = document.createElement("iframe");
         iframe.style.display = "none";
@@ -179,7 +443,304 @@
         return getOwner(methodName, win)[methodName];
       };
 
+      const captureCallError = (fn) => {
+        try {
+          fn();
+          return { threw: false, name: "", message: "", stackHash: 0, firstStackLine: "" };
+        } catch (error) {
+          const stack = String((error && error.stack) || "");
+          return {
+            threw: true,
+            name: String((error && error.name) || ""),
+            message: String((error && error.message) || ""),
+            stackHash: hashString(stack),
+            firstStackLine: stack.split("\n")[0] || ""
+          };
+        }
+      };
+
+      const compareErrorShape = (left, right) => {
+        return left.threw === right.threw && left.name === right.name && left.message === right.message;
+      };
+
+      const getApiTamperFlagsLikeLeakdig = (ctx) => {
+        const flags = [];
+        const canvasProto = HTMLCanvasElement.prototype;
+        const ctxProto = CanvasRenderingContext2D.prototype;
+        const checks = [
+          [1, canvasProto, "getContext"],
+          [1, canvasProto, "toDataURL"],
+          [1, canvasProto, "toBlob"],
+          [1, ctxProto, "getImageData"],
+          [1, ctxProto, "fillText"],
+          [1, ctxProto, "strokeText"],
+          [1, ctxProto, "drawImage"],
+          [1, ctxProto, "createLinearGradient"],
+          [1, ctxProto, "bezierCurveTo"]
+        ];
+
+        for (const [flag, owner, name] of checks) {
+          const fn = owner && owner[name];
+          if (typeof fn !== "function") {
+            flags.push(flag + ":" + name + ":missing");
+            continue;
+          }
+          const src = Function.prototype.toString.call(fn);
+          if (!/\[native code\]/.test(src)) flags.push(flag + ":" + name + ":source");
+          if (Object.getOwnPropertyNames(fn).filter((key) => !["length", "name"].includes(key)).length) {
+            flags.push(flag + ":" + name + ":own-props");
+          }
+        }
+
+        const referenceMethods = [
+          "createLinearGradient",
+          "fillRect",
+          "beginPath",
+          "moveTo",
+          "lineTo",
+          "bezierCurveTo",
+          "fillText",
+          "drawImage",
+          "getImageData"
+        ];
+        for (const name of referenceMethods) {
+          const value = ctx[name];
+          if (typeof value === "function" && value !== ctxProto[name]) {
+            flags.push("1:" + name + ":instance-reference");
+          }
+        }
+
+        return flags;
+      };
+
+      const getProxyHookLikeLeakdig = (ctx) => {
+        const flags = [];
+        const probeMethods = ["fillRect", "fillText", "getImageData", "drawImage", "createLinearGradient"];
+        for (const name of probeMethods) {
+          const fn = ctx[name];
+          const protoFn = CanvasRenderingContext2D.prototype[name];
+          if (typeof fn !== "function" || typeof protoFn !== "function") continue;
+
+          const ownNames = Object.getOwnPropertyNames(fn).filter((key) => !["length", "name"].includes(key));
+          if (ownNames.length) flags.push(name + ":function-own-props:" + ownNames.join(","));
+          if (fn !== protoFn) flags.push(name + ":proxy-or-bound-reference");
+
+          const direct = captureCallError(() => fn.call({}, 0, 0, 1, 1));
+          const protoDirect = captureCallError(() => protoFn.call({}, 0, 0, 1, 1));
+          if (!compareErrorShape(direct, protoDirect)) {
+            flags.push(name + ":illegal-invocation-shape");
+          }
+        }
+        return flags;
+      };
+
+      const proxyHookHandleLikeLeakdig = (value) => {
+        try {
+          Date.prototype.toString.call(value);
+        } catch (error) {
+          return String((error && error.stack) || "").includes("Proxy.");
+        }
+        return false;
+      };
+
+      const getFullProxyHookLikeLeakdig = (ctx) => {
+        const candidates = [
+          ["Function.prototype", Function.prototype],
+          ["Function.prototype.toString", Function.prototype.toString],
+          ["Navigator.prototype.toString", Navigator.prototype.toString],
+          ["Object.prototype.toString", Object.prototype.toString],
+          ["JSON.stringify", JSON.stringify],
+          ["HTMLCanvasElement.prototype", HTMLCanvasElement.prototype],
+          ["HTMLCanvasElement.prototype.getContext", HTMLCanvasElement.prototype.getContext],
+          ["HTMLCanvasElement.prototype.toDataURL", HTMLCanvasElement.prototype.toDataURL],
+          ["CanvasRenderingContext2D.prototype", CanvasRenderingContext2D.prototype],
+          ["CanvasRenderingContext2D.prototype.getImageData", CanvasRenderingContext2D.prototype.getImageData],
+          ["ctx.getImageData", ctx && ctx.getImageData],
+          ["window.setInterval", window.setInterval],
+          ["window.setTimeout", window.setTimeout],
+          ["localStorage.getItem", window.localStorage && window.localStorage.getItem],
+          ["localStorage.setItem", window.localStorage && window.localStorage.setItem],
+          ["sessionStorage.getItem", window.sessionStorage && window.sessionStorage.getItem],
+          ["sessionStorage.setItem", window.sessionStorage && window.sessionStorage.setItem],
+          ["Object.keys", Object.keys]
+        ];
+        return candidates
+          .filter((entry) => proxyHookHandleLikeLeakdig(entry[1]))
+          .map((entry) => entry[0]);
+      };
+
+      const checkPrototypeMethodHook = (instance, constructor, methodName) => {
+        try {
+          return instance[methodName] !== constructor.prototype[methodName];
+        } catch {
+          return true;
+        }
+      };
+
+      const checkPrototypeMethodToStringHook = (instance, constructor, methodName) => {
+        try {
+          return instance[methodName].toString !== constructor.prototype[methodName].toString;
+        } catch {
+          return true;
+        }
+      };
+
+      const checkPrototypeMethodToStringCallbackHook = (instance, constructor, methodName) => {
+        try {
+          return !isNativeFunction(instance[methodName]) || !isNativeFunction(constructor.prototype[methodName]);
+        } catch {
+          return true;
+        }
+      };
+
+      const checkHookLikeLeakdig = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const fn = function () {};
+        const checks = [
+          ["canvas.getContext reference", checkPrototypeMethodHook(canvas, HTMLCanvasElement, "getContext")],
+          ["canvas.getContext toString reference", checkPrototypeMethodToStringHook(canvas, HTMLCanvasElement, "getContext")],
+          ["canvas.getContext native callback", checkPrototypeMethodToStringCallbackHook(canvas, HTMLCanvasElement, "getContext")],
+          ["canvas.toDataURL reference", checkPrototypeMethodHook(canvas, HTMLCanvasElement, "toDataURL")],
+          ["canvas.toDataURL toString reference", checkPrototypeMethodToStringHook(canvas, HTMLCanvasElement, "toDataURL")],
+          ["canvas.toDataURL native callback", checkPrototypeMethodToStringCallbackHook(canvas, HTMLCanvasElement, "toDataURL")],
+          ["ctx.getImageData reference", checkPrototypeMethodHook(ctx, CanvasRenderingContext2D, "getImageData")],
+          ["ctx.getImageData toString reference", checkPrototypeMethodToStringHook(ctx, CanvasRenderingContext2D, "getImageData")],
+          ["ctx.getImageData native callback", checkPrototypeMethodToStringCallbackHook(ctx, CanvasRenderingContext2D, "getImageData")],
+          ["navigator.toString reference", checkPrototypeMethodHook(navigator, Navigator, "toString")],
+          ["navigator.toString toString reference", checkPrototypeMethodToStringHook(navigator, Navigator, "toString")],
+          ["navigator.toString native callback", checkPrototypeMethodToStringCallbackHook(navigator, Navigator, "toString")],
+          ["document.getElementById native", !isNativeFunction(document.getElementById)],
+          ["document.createElement native", !isNativeFunction(document.createElement)],
+          ["JSON.stringify native", !isNativeFunction(JSON.stringify)],
+          ["JSON.parse native", !isNativeFunction(JSON.parse)],
+          ["window.setInterval native", !isNativeFunction(window.setInterval)],
+          ["window.eval native", !isNativeFunction(window.eval)],
+          ["window.matchMedia native", !isNativeFunction(window.matchMedia)],
+          ["Object.getOwnPropertyNames native", !isNativeFunction(Object.getOwnPropertyNames)],
+          ["Function.prototype.toString reference", checkPrototypeMethodHook(fn, Function, "toString")],
+          ["Function.prototype.toString native callback", checkPrototypeMethodToStringCallbackHook(fn, Function, "toString")]
+        ];
+        return checks.filter((entry) => entry[1]).map((entry) => entry[0]);
+      };
+
+      const getOwnPropertyDescriptorHookLikeLeakdig = () => {
+        const flags = [];
+        if (proxyHookHandleLikeLeakdig(navigator)) flags.push("navigator:proxy-stack");
+        try {
+          if (typeof Object.getOwnPropertyDescriptor(navigator, "maxTouchPoints") === "object") {
+            flags.push("navigator.maxTouchPoints:own-descriptor");
+          }
+        } catch (error) {
+          flags.push("navigator.maxTouchPoints:descriptor-error");
+        }
+        try {
+          if (
+            navigator.connection &&
+            typeof Object.getOwnPropertyDescriptor(navigator.connection, "rtt") === "object"
+          ) {
+            flags.push("navigator.connection.rtt:own-descriptor");
+          }
+        } catch (error) {
+          flags.push("navigator.connection.rtt:descriptor-error");
+        }
+        return flags;
+      };
+
+      const detectionFunctionToStringTamperLikeLeakdig = () => {
+        try {
+          Function.prototype.toString.call({});
+          return { suspicious: false, stack: "" };
+        } catch (error) {
+          const stack = String((error && error.stack) || "");
+          const needles = [
+            "chrome-extension://",
+            "moz-extension://",
+            "safari-extension://",
+            "extension://",
+            "content-scripts/",
+            "injected.js"
+          ];
+          return {
+            suspicious: needles.some((needle) => stack.includes(needle)),
+            stack: stack.split("\n").slice(0, 5).join("\n")
+          };
+        }
+      };
+
+      const getNativeApiTamperFlagsLikeLeakdig = () => {
+        const flags = [];
+        try {
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+          const audioCtor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          const audio = audioCtor ? new audioCtor(1, 44100, 44100) : null;
+
+          const navigatorKeys = Object.keys(window.navigator || {});
+          if (navigatorKeys.length && !navigatorKeys.some((key) => ["mozApps", "mozTCPSocket"].includes(key))) {
+            flags.push("navigator");
+          }
+          const screenKeys = Object.keys(window.screen || {});
+          if (screenKeys.length) flags.push("screen");
+
+          if (Object.getOwnPropertyDescriptors) {
+            const navigatorDescriptorKeys = Object.keys(Object.getOwnPropertyDescriptors(window.navigator || {}));
+            const screenDescriptorKeys = Object.keys(Object.getOwnPropertyDescriptors(window.screen || {}));
+            if (!navigatorKeys.length && navigatorDescriptorKeys.length) flags.push("navigator:descriptors");
+            if (!screenKeys.length && screenDescriptorKeys.length) flags.push("screen:descriptors");
+          }
+
+          if (canvas && canvas.toDataURL && !isNativeFunction(canvas.toDataURL)) flags.push("toDataURL");
+          if (ctx && ctx.getImageData && !isNativeFunction(ctx.getImageData)) flags.push("getImageData");
+          if (audio && audio.createAnalyser && !isNativeFunction(audio.createAnalyser)) flags.push("createAnalyser");
+          if (
+            gl &&
+            Object.getOwnPropertyDescriptor &&
+            WebGLRenderingContext &&
+            Object.getOwnPropertyDescriptor(WebGLRenderingContext.prototype, "bufferData") &&
+            !isNativeFunction(Object.getOwnPropertyDescriptor(WebGLRenderingContext.prototype, "bufferData").value)
+          ) {
+            flags.push("bufferData");
+          }
+          if (
+            gl &&
+            Object.getOwnPropertyDescriptor &&
+            WebGLRenderingContext &&
+            Object.getOwnPropertyDescriptor(WebGLRenderingContext.prototype, "getParameter") &&
+            !isNativeFunction(Object.getOwnPropertyDescriptor(WebGLRenderingContext.prototype, "getParameter").value)
+          ) {
+            flags.push("getParameter");
+          }
+        } catch (error) {
+          flags.push("exception:" + String((error && error.message) || error));
+        }
+        return flags;
+      };
+
       const renderFingerprintCanvas = (canvas) => {
+        canvas.width = canvasRect.width;
+        canvas.height = canvasRect.height;
+        const ctx = canvas.getContext("2d");
+        const text = "https://browserscan.ai";
+        ctx.textBaseline = "top";
+        ctx.font = "14px 'Times New Roman'";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = "#f60";
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = "#069";
+        ctx.fillText(text, 2, 15);
+        ctx.fillText("🙂", 150, 15);
+        ctx.font = "22px 'Arial'";
+        ctx.fillStyle = "rgba(102, 204, 0, 0.5)";
+        ctx.fillText(text, 2, 22);
+        ctx.fillText("🙂", 220, 22);
+        ctx.fillStyle = "rgba(255,255,255,1)";
+        ctx.fillRect(0, 0, 1, 1);
+        return ctx;
+      };
+
+      const renderSemanticCanvas = (canvas) => {
         canvas.width = 280;
         canvas.height = 120;
         const ctx = canvas.getContext("2d");
@@ -201,6 +762,472 @@
         ctx.stroke();
         ctx.globalAlpha = 1;
         return ctx;
+      };
+
+      const renderPseudoGradientRing = (canvas) => {
+        canvas.width = 180;
+        canvas.height = 180;
+        const ctx = canvas.getContext("2d");
+        const cx = 90;
+        const cy = 90;
+        const outer = 72;
+        const inner = 42;
+        const steps = 96;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < steps; i++) {
+          const start = (i / steps) * Math.PI * 2;
+          const end = ((i + 1.02) / steps) * Math.PI * 2;
+          const hue = Math.round((i / steps) * 360);
+          ctx.beginPath();
+          ctx.arc(cx, cy, outer, start, end);
+          ctx.arc(cx, cy, inner, end, start, true);
+          ctx.closePath();
+          ctx.fillStyle = `hsl(${hue}, 78%, 54%)`;
+          ctx.fill();
+        }
+        ctx.strokeStyle = "rgba(0,0,0,0.18)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, outer, 0, Math.PI * 2);
+        ctx.arc(cx, cy, inner, 0, Math.PI * 2);
+        ctx.stroke();
+        return ctx;
+      };
+
+      const renderTrueGradientRing = (canvas) => {
+        canvas.width = 180;
+        canvas.height = 180;
+        const ctx = canvas.getContext("2d");
+        const cx = 90;
+        const cy = 90;
+        const outer = 72;
+        const inner = 42;
+        const gradient = ctx.createConicGradient ? ctx.createConicGradient(-Math.PI / 2, cx, cy) : ctx.createRadialGradient(cx, cy, inner, cx, cy, outer);
+        gradient.addColorStop(0, "#ff3b30");
+        gradient.addColorStop(0.18, "#ffcc00");
+        gradient.addColorStop(0.36, "#34c759");
+        gradient.addColorStop(0.54, "#00c7be");
+        gradient.addColorStop(0.72, "#007aff");
+        gradient.addColorStop(0.9, "#af52de");
+        gradient.addColorStop(1, "#ff3b30");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.arc(cx, cy, outer, 0, Math.PI * 2);
+        ctx.arc(cx, cy, inner, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill("evenodd");
+        ctx.strokeStyle = "rgba(0,0,0,0.18)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, outer, 0, Math.PI * 2);
+        ctx.arc(cx, cy, inner, 0, Math.PI * 2);
+        ctx.stroke();
+        return ctx;
+      };
+
+      const analyzeRingCanvas = (render) => {
+        const first = document.createElement("canvas");
+        const firstCtx = render(first);
+        const firstDataUrl = first.toDataURL();
+        const firstPixels = firstCtx.getImageData(0, 0, first.width, first.height).data;
+        const second = document.createElement("canvas");
+        const secondCtx = render(second);
+        const secondDataUrl = second.toDataURL();
+        const secondPixels = secondCtx.getImageData(0, 0, second.width, second.height).data;
+        const histogram = getHistogramBins(firstPixels);
+        const secondHistogram = getHistogramBins(secondPixels);
+        const firstPixelHash = hashBytes(firstPixels);
+        const secondPixelHash = hashBytes(secondPixels);
+        const firstColorCount = countColors(firstPixels);
+        const secondColorCount = countColors(secondPixels);
+        const firstHistogramHash = hashString(histogram.join(","));
+        const secondHistogramHash = hashString(secondHistogram.join(","));
+        return {
+          dataUrlA: hashString(firstDataUrl),
+          dataUrlB: hashString(secondDataUrl),
+          pixelA: firstPixelHash,
+          pixelB: secondPixelHash,
+          colorCountA: firstColorCount,
+          colorCountB: secondColorCount,
+          histogramHashA: firstHistogramHash,
+          histogramHashB: secondHistogramHash,
+          pixelStable: firstPixelHash === secondPixelHash,
+          dataUrlStable: firstDataUrl === secondDataUrl,
+          colorCountStable: firstColorCount === secondColorCount,
+          histogramStable: firstHistogramHash === secondHistogramHash,
+          stable:
+            firstDataUrl === secondDataUrl &&
+            firstPixelHash === secondPixelHash &&
+            firstColorCount === secondColorCount &&
+            firstHistogramHash === secondHistogramHash
+        };
+      };
+
+      const getGradientRingReport = () => {
+        const pseudo = analyzeRingCanvas(renderPseudoGradientRing);
+        const real = analyzeRingCanvas(renderTrueGradientRing);
+        return {
+          pseudo,
+          real,
+          conicGradientSupported: typeof CanvasRenderingContext2D.prototype.createConicGradient === "function",
+          pseudoAndRealDiffer: pseudo.pixelA !== real.pixelA,
+          note:
+            "Pseudo-gradient ring has deterministic segment colors, so its color count and histogram should be stable. True gradient color count is browser-renderer dependent; this probe records it but does not require a fixed count."
+        };
+      };
+
+      const samePixel = (data, expected) => {
+        return expected.every((value, index) => data[index] === value);
+      };
+
+      const getSinglePixelReport = () => {
+        const blank = document.createElement("canvas");
+        blank.width = 1;
+        blank.height = 1;
+        const blankCtx = blank.getContext("2d");
+        const blankPixel = Array.from(blankCtx.getImageData(0, 0, 1, 1).data);
+
+        const fill = document.createElement("canvas");
+        fill.width = 1;
+        fill.height = 1;
+        const fillCtx = fill.getContext("2d");
+        fillCtx.fillStyle = "rgb(17, 34, 51)";
+        fillCtx.fillRect(0, 0, 1, 1);
+        const fillPixelA = Array.from(fillCtx.getImageData(0, 0, 1, 1).data);
+        const fillPixelB = Array.from(fillCtx.getImageData(0, 0, 1, 1).data);
+        const fillUrlA = fill.toDataURL();
+        const fillUrlB = fill.toDataURL();
+
+        const imageDataCanvas = document.createElement("canvas");
+        imageDataCanvas.width = 1;
+        imageDataCanvas.height = 1;
+        const imageDataCtx = imageDataCanvas.getContext("2d");
+        const pixel = imageDataCtx.createImageData(1, 1);
+        pixel.data[0] = 201;
+        pixel.data[1] = 33;
+        pixel.data[2] = 77;
+        pixel.data[3] = 255;
+        imageDataCtx.putImageData(pixel, 0, 0);
+        const putPixelA = Array.from(imageDataCtx.getImageData(0, 0, 1, 1).data);
+        const putPixelB = Array.from(imageDataCtx.getImageData(0, 0, 1, 1).data);
+        const putUrlA = imageDataCanvas.toDataURL();
+        const putUrlB = imageDataCanvas.toDataURL();
+
+        return {
+          blankPixel,
+          blankExact: samePixel(blankPixel, [0, 0, 0, 0]),
+          fillPixelA,
+          fillPixelB,
+          fillStable: fillPixelA.join(",") === fillPixelB.join(",") && fillUrlA === fillUrlB,
+          fillExpected: samePixel(fillPixelA, [17, 34, 51, 255]),
+          fillDataUrlA: hashString(fillUrlA),
+          fillDataUrlB: hashString(fillUrlB),
+          putPixelA,
+          putPixelB,
+          putStable: putPixelA.join(",") === putPixelB.join(",") && putUrlA === putUrlB,
+          putExpected: samePixel(putPixelA, [201, 33, 77, 255]),
+          putDataUrlA: hashString(putUrlA),
+          putDataUrlB: hashString(putUrlB)
+        };
+      };
+
+      const getPixelChecksumLikeLeakdig = (ctx) => {
+        const data = ctx.getImageData(canvasRect.x, canvasRect.y, canvasRect.width, canvasRect.height).data;
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i] || 0;
+        return sum;
+      };
+
+      const countColorsOptimizedLikeLeakdig = (ctx) => {
+        const imageData = ctx.getImageData(0, 0, 240, 30);
+        const values = new Uint32Array(imageData.data.buffer);
+        const colors = Object.create(null);
+        let count = 0;
+        for (let i = 0; i < values.length; i++) {
+          const color = String(values[i] & 0xffffff);
+          if (!colors[color]) {
+            count++;
+            colors[color] = 1;
+          } else {
+            colors[color]++;
+          }
+        }
+        return count <= 1 ? "N/A" : count;
+      };
+
+      const generateCanvasFingerprintLikeLeakdig = (canvas) => {
+        renderFingerprintCanvas(canvas);
+        return canvas.toDataURL();
+      };
+
+      const generateCanvasDataLikeLeakdig = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const context = renderFingerprintCanvas(canvas);
+          return { dataURL: canvas.toDataURL(), canvas, context };
+        } catch (error) {
+          return { error: String((error && error.message) || error) };
+        }
+      };
+
+      const getSimpleCanvasDataLikeLeakdig = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 48;
+        canvas.height = 16;
+        const ctx = canvas.getContext("2d");
+        ctx.font = "14px serif";
+        ctx.fillText("驫ណශண", 2, 12);
+        ctx.lineWidth = 2;
+        ctx.arc(12, 6, 8, 0, 2);
+        ctx.stroke();
+        return canvas.toDataURL();
+      };
+
+      const getComplexCanvasDataLikeLeakdig = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 150;
+        canvas.height = 60;
+        const ctx = canvas.getContext("2d");
+        ctx.fillRect(0, 0, 10, 10);
+        ctx.fillRect(2, 2, 6, 6);
+        const evenodd = ctx.isPointInPath(5, 5, "evenodd");
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = "#f60";
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = "#069";
+        ctx.font = "8pt Arial";
+        ctx.fillText("Cwm fjordbank glyphs vext quiz,", 2, 15);
+        ctx.fillStyle = "rgba(102, 204, 0, 0.2)";
+        ctx.font = "18pt Arial";
+        ctx.fillText("Cwm fjordbank glyphs vext quiz,", 4, 45);
+        ctx.globalCompositeOperation = "multiply";
+        ctx.fillStyle = "rgb(255,0,255)";
+        ctx.beginPath();
+        ctx.arc(20, 20, 20, 0, 2 * Math.PI, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgb(0,255,255)";
+        ctx.beginPath();
+        ctx.arc(50, 20, 20, 0, 2 * Math.PI, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgb(255,255,0)";
+        ctx.beginPath();
+        ctx.arc(35, 40, 20, 0, 2 * Math.PI, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgb(255,0,255)";
+        ctx.arc(20, 25, 10, 0, 2 * Math.PI, true);
+        ctx.arc(20, 25, 20, 0, 2 * Math.PI, true);
+        ctx.fill("evenodd");
+        const gradient = ctx.createLinearGradient(40, 50, 60, 78);
+        gradient.addColorStop(0, "blue");
+        gradient.addColorStop(0.5, "red");
+        gradient.addColorStop(1, "white");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(70, 50, 10, 0, 2 * Math.PI, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.font = "8pt Arial";
+        ctx.strokeText(String(Math.tan(-1e100)), 2, 30);
+        const base64 = canvas.toDataURL();
+        ctx.fillStyle = "#808080";
+        ctx.font = "8pt Arial";
+        ctx.fillText("NOT AVAILABLE", 2, 30);
+        const valueBase64 = canvas.toDataURL();
+        const pixelData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        return { canvas, base64, valueBase64, evenodd, pixelData };
+      };
+
+      const checkDataUrlRenderingLikeLeakdig = () => {
+        return new Promise((resolve) => {
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext && canvas.getContext("2d");
+          if (!ctx) {
+            resolve({ ok: false, reason: "no-2d" });
+            return;
+          }
+          const image = new Image();
+          image.onload = function () {
+            try {
+              ctx.drawImage(image, 0, 0);
+              const data = ctx.getImageData(0, 0, 1, 1).data;
+              const white = data[0] === 255 && data[1] === 255 && data[2] === 255 && data[3] === 255;
+              const transparent = data[0] === 0 && data[1] === 0 && data[2] === 0 && data[3] === 0;
+              resolve({ ok: white, unsupported: transparent, pixel: Array.from(data) });
+            } catch (error) {
+              resolve({ ok: false, unsupported: true, reason: error.message });
+            }
+          };
+          image.onerror = function () {
+            resolve({ ok: false, unsupported: true, reason: "image-error" });
+          };
+          image.src =
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8//8/AwAI/AL+X9xVmgAAAABJRU5ErkJggg==";
+          setTimeout(() => resolve({ ok: false, unsupported: true, reason: "timeout" }), 1000);
+        });
+      };
+
+      const checkBase64EqualLikeLeakdig = () => {
+        return new Promise((resolve) => {
+          try {
+            const imageSource =
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAAAeCAYAAABkxJY9AAAAJ0lEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAA4M8BXQAB3RmEXAAAAABJRU5ErkJggg==";
+            const canvasA = document.createElement("canvas");
+            const canvasB = document.createElement("canvas");
+            canvasA.width = canvasB.width = 240;
+            canvasA.height = canvasB.height = 30;
+            const ctxA = canvasA.getContext("2d");
+            const ctxB = canvasB.getContext("2d");
+            const image = new Image();
+            image.onload = function () {
+              try {
+                ctxA.drawImage(image, 0, 0);
+                ctxB.drawImage(image, 0, 0);
+                const a = canvasA.toDataURL();
+                const b = canvasB.toDataURL();
+                resolve({
+                  stable: a === b,
+                  firstHash: hashString(a),
+                  secondHash: hashString(b),
+                  note: "Uses a fixed embedded PNG and checks repeated render/export stability. The live site also compares against browser-specific allowlists."
+                });
+              } catch (error) {
+                resolve({ stable: false, unsupported: true, reason: error.message });
+              }
+            };
+            image.onerror = function () {
+              resolve({ stable: false, unsupported: true, reason: "image-error" });
+            };
+            image.src = imageSource;
+            setTimeout(() => resolve({ stable: false, unsupported: true, reason: "timeout" }), 1000);
+          } catch (error) {
+            resolve({ stable: false, unsupported: true, reason: error.message });
+          }
+        });
+      };
+
+      const isDrawImagePixelConsistentLikeLeakdig = () => {
+        const gpu = hasGPURenderer();
+        if (!isBlinkLike() || !gpu.available || gpu.isSoftware) {
+          return Promise.resolve({ ok: true, skipped: true, gpu });
+        }
+        try {
+          const source = document.createElement("canvas");
+          const replay = document.createElement("canvas");
+          const sourceCtx = source.getContext("2d");
+          const replayCtx = replay.getContext("2d");
+          const dataUrl = generateCanvasFingerprintLikeLeakdig(source);
+          replay.width = canvasRect.width;
+          replay.height = canvasRect.height;
+          return new Promise((resolve) => {
+            const image = new Image();
+            image.onload = function () {
+              try {
+                replayCtx.drawImage(image, 0, 0);
+                const sourcePixels = sourceCtx.getImageData(0, 0, source.width, source.height).data;
+                const replayPixels = replayCtx.getImageData(0, 0, replay.width, replay.height).data;
+                resolve({
+                  ok: compareData(sourcePixels, replayPixels),
+                  sourceHash: hashBytes(sourcePixels),
+                  replayHash: hashBytes(replayPixels),
+                  diff: getPixelDiffSummary(sourcePixels, replayPixels),
+                  gpu
+                });
+              } catch (error) {
+                resolve({ ok: false, reason: error.message, gpu });
+              }
+            };
+            image.onerror = function () {
+              resolve({ ok: false, reason: "image-error", gpu });
+            };
+            image.src = dataUrl;
+            setTimeout(() => resolve({ ok: false, reason: "timeout", gpu }), 1000);
+          });
+        } catch (error) {
+          return Promise.resolve({ ok: false, reason: error.message, gpu });
+        }
+      };
+
+      const getBlinkCanvasNoiseLikeLeakdig = () => {
+        const gpu = hasGPURenderer();
+        if (!isBlinkLike() || !gpu.available || gpu.isSoftware) {
+          return Promise.resolve({ ok: true, skipped: true, gpu });
+        }
+        const createCanvas2D = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = 1;
+          canvas.height = 1;
+          return [canvas, canvas.getContext && canvas.getContext("2d")];
+        };
+        const [source, sourceCtx] = createCanvas2D();
+        const [replay, replayCtx] = createCanvas2D();
+        if (!sourceCtx || !replayCtx) return Promise.resolve({ ok: false, reason: "no-2d", gpu });
+
+        source.width = 21;
+        source.height = 120;
+        replay.width = 21;
+        replay.height = 120;
+        sourceCtx.fillStyle = "#666";
+        sourceCtx.fillRect(0, 0, 21, 120);
+        sourceCtx.font = '8pt "Times New Roman"';
+        sourceCtx.fillText("H", 6, 14);
+        const dataUrl = source.toDataURL();
+        const expectedNoisePixels = [
+          0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x99, 0x9a, 0x9b, 0x9e, 0x9f,
+          0xae, 0xaf, 0xb0, 0xb3, 0xb4, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xd8, 0xd9, 0xda,
+          0xdd, 0xde, 0xed, 0xee, 0xef, 0xf2, 0xf3, 0x102, 0x103, 0x104, 0x107, 0x108, 0x116, 0x117,
+          0x118, 0x119, 0x11a, 0x11b, 0x11c, 0x11d, 0x11e, 0x11f, 0x9c, 0x9d, 0xa0, 0xdb, 0xdc
+        ];
+
+        return new Promise((resolve) => {
+          const image = new Image();
+          image.onload = function () {
+            try {
+              replayCtx.drawImage(image, 0, 0);
+              const sourceData = Array.from(sourceCtx.getImageData(0, 0, source.width, source.height).data);
+              const replayData = Array.from(replayCtx.getImageData(0, 0, replay.width, replay.height).data);
+              let nonBackgroundPixels = [];
+              sourceData.forEach((value, index) => {
+                if (value !== 0x66) nonBackgroundPixels.push(Math.floor(index / 4));
+              });
+              nonBackgroundPixels = Array.from(new Set(nonBackgroundPixels));
+              const unexpectedPixels = nonBackgroundPixels.filter((pixel) => !expectedNoisePixels.includes(pixel));
+              const unexpectedValues = unexpectedPixels.flatMap((pixel) => [
+                sourceData[pixel * 4],
+                sourceData[pixel * 4 + 1],
+                sourceData[pixel * 4 + 2],
+                sourceData[pixel * 4 + 3]
+              ]);
+              const diffIndexes = [];
+              const diffValues = [];
+              replayData.forEach((value, index) => {
+                if (value !== sourceData[index]) {
+                  diffIndexes.push(index);
+                  diffValues.push(value - sourceData[index]);
+                }
+              });
+              resolve({
+                ok: diffIndexes.length === 0 && unexpectedPixels.length === 0,
+                diffIndexes: diffIndexes.join(","),
+                diffValues: diffValues.join(","),
+                unexpectedPixels: unexpectedPixels.join(","),
+                unexpectedValues: unexpectedValues.join(","),
+                dataUrlHash: hashString(dataUrl),
+                gpu
+              });
+            } catch (error) {
+              resolve({ ok: false, reason: error.message, gpu });
+            }
+          };
+          image.onerror = function () {
+            resolve({ ok: false, reason: "image-error", gpu });
+          };
+          image.src = dataUrl;
+          setTimeout(() => resolve({ ok: false, reason: "timeout", gpu }), 1000);
+        });
       };
 
       const drawImageConsistency = () => {
@@ -251,227 +1278,366 @@
         checks.push({ name, failed, details, severity });
       };
 
-      const clean = createCleanRealm();
-      try {
-        const cleanToString = clean.win.Function.prototype.toString;
-        const localToString = Function.prototype.toString;
-        const localToStringSource = localToString.call(localToString);
-        const cleanToStringSource = cleanToString.call(cleanToString);
+      const renderResults = () => {
+        const failed = checks.filter((check) => check.failed);
+        const summary = document.getElementById("summary");
+        summary.className = "summary " + (failed.length ? "fail" : "pass");
+        summary.textContent = failed.length
+          ? "Canvas abnormal: " + failed.length + " suspicious checks failed"
+          : "Canvas looks normal under this leakdig-style probe";
 
-        addCheck(
-          "Function.prototype.toString realm match",
-          localToStringSource !== cleanToStringSource,
+        const tbody = document.getElementById("checks");
+        tbody.textContent = "";
+        for (const check of checks) {
+          const tr = document.createElement("tr");
+          const name = document.createElement("td");
+          const status = document.createElement("td");
+          const details = document.createElement("td");
+          name.textContent = check.name;
+          status.textContent = check.failed ? "FAIL" : "PASS";
+          status.className = check.failed ? "fail-text" : "pass-text";
+          details.textContent = JSON.stringify(check.details, null, 2);
+          tr.append(name, status, details);
+          tbody.append(tr);
+        }
+
+        document.getElementById("raw").textContent = JSON.stringify(
           {
-            localHash: hashString(localToStringSource),
-            cleanHash: hashString(cleanToStringSource),
-            localDescriptor: stringifyDescriptor(
-              Object.getOwnPropertyDescriptor(Function.prototype, "toString")
-            ),
-            cleanDescriptor: stringifyDescriptor(
-              Object.getOwnPropertyDescriptor(clean.win.Function.prototype, "toString")
-            )
-          }
+            canvasAbnormal: failed.length > 0,
+            failed: failed.map((check) => check.name),
+            checks
+          },
+          null,
+          2
         );
+      };
 
-        for (const methodName of methodNames) {
-          const owner = getOwner(methodName);
-          const cleanOwner = getOwner(methodName, clean.win);
-          const method = owner[methodName];
-          const cleanMethod = cleanOwner[methodName];
-          if (typeof method !== "function" || typeof cleanMethod !== "function") continue;
-
-          const directSource = method.toString();
-          const borrowedSource = Function.prototype.toString.call(method);
-          const cleanBorrowedSource = cleanToString.call(method);
-          const cleanNativeSource = cleanToString.call(cleanMethod);
+      const run = async () => {
+        const clean = createCleanRealm();
+        try {
+          const cleanToString = clean.win.Function.prototype.toString;
+          const localToString = Function.prototype.toString;
+          const localToStringSource = localToString.call(localToString);
+          const cleanToStringSource = cleanToString.call(cleanToString);
 
           addCheck(
-            methodName + " native string",
-            directSource !== borrowedSource ||
-              borrowedSource !== cleanNativeSource ||
-              cleanBorrowedSource !== cleanNativeSource ||
-              !/\[native code\]/.test(borrowedSource),
+            "Function.prototype.toString realm match",
+            localToStringSource !== cleanToStringSource,
             {
-              directHash: hashString(directSource),
-              localBorrowedHash: hashString(borrowedSource),
-              cleanBorrowedHash: hashString(cleanBorrowedSource),
-              cleanNativeHash: hashString(cleanNativeSource)
+              localHash: hashString(localToStringSource),
+              cleanHash: hashString(cleanToStringSource),
+              localDescriptor: stringifyDescriptor(Object.getOwnPropertyDescriptor(Function.prototype, "toString")),
+              cleanDescriptor: stringifyDescriptor(Object.getOwnPropertyDescriptor(clean.win.Function.prototype, "toString"))
             }
           );
 
+          for (const methodName of methodNames) {
+            const owner = getOwner(methodName);
+            const cleanOwner = getOwner(methodName, clean.win);
+            const method = owner[methodName];
+            const cleanMethod = cleanOwner[methodName];
+            if (typeof method !== "function" || typeof cleanMethod !== "function") continue;
+
+            const directSource = method.toString();
+            const borrowedSource = Function.prototype.toString.call(method);
+            const cleanBorrowedSource = cleanToString.call(method);
+            const cleanNativeSource = cleanToString.call(cleanMethod);
+
+            addCheck(
+              methodName + " native string",
+              directSource !== borrowedSource ||
+                borrowedSource !== cleanNativeSource ||
+                cleanBorrowedSource !== cleanNativeSource ||
+                !/\[native code\]/.test(borrowedSource),
+              {
+                directHash: hashString(directSource),
+                localBorrowedHash: hashString(borrowedSource),
+                cleanBorrowedHash: hashString(cleanBorrowedSource),
+                cleanNativeHash: hashString(cleanNativeSource)
+              }
+            );
+
+            addCheck(
+              methodName + " name/length",
+              method.name !== cleanMethod.name || method.length !== cleanMethod.length,
+              {
+                current: { name: method.name, length: method.length },
+                clean: { name: cleanMethod.name, length: cleanMethod.length }
+              },
+              "medium"
+            );
+
+            const descriptor = Object.getOwnPropertyDescriptor(owner, methodName);
+            const cleanDescriptor = Object.getOwnPropertyDescriptor(cleanOwner, methodName);
+            addCheck(
+              methodName + " descriptor",
+              !sameDescriptorShape(descriptor, cleanDescriptor),
+              {
+                current: stringifyDescriptor(descriptor),
+                clean: stringifyDescriptor(cleanDescriptor)
+              },
+              "medium"
+            );
+
+            const ownNames = Object.getOwnPropertyNames(method).filter((key) => !["length", "name"].includes(key));
+            const cleanOwnNames = Object.getOwnPropertyNames(cleanMethod).filter((key) => !["length", "name"].includes(key));
+            addCheck(
+              methodName + " own properties",
+              ownNames.join("|") !== cleanOwnNames.join("|"),
+              { current: ownNames, clean: cleanOwnNames },
+              "medium"
+            );
+          }
+
+          const snapshotResults = getSnapshotComparisonLikeLeakdig();
+          const snapshotMismatches = snapshotResults.filter((result) => !result.same);
           addCheck(
-            methodName + " name/length",
-            method.name !== cleanMethod.name || method.length !== cleanMethod.length,
+            "leakdig original function snapshot",
+            snapshotMismatches.length > 0,
+            { mismatches: snapshotMismatches, all: snapshotResults },
+            "high"
+          );
+
+          const navigatorKeys = getNavigatorKeysLikeLeakdig();
+          const screenKeys = getScreenKeysLikeLeakdig();
+          addCheck(
+            "leakdig navigator/screen own keys",
+            navigatorKeys.length > 0 || screenKeys.length > 0,
+            { navigatorKeys, screenKeys },
+            "medium"
+          );
+
+          const pluginToString = getPluginToStringLikeLeakdig();
+          addCheck(
+            "leakdig plugin toString",
+            /^error:/.test(pluginToString),
+            { value: pluginToString },
+            "medium"
+          );
+
+          const evalLength = getEvalFunctionLengthLikeLeakdig();
+          addCheck(
+            "leakdig eval function length",
+            evalLength <= 0,
+            { length: evalLength },
+            "medium"
+          );
+
+          const windowHook = windowHookLikeLeakdig();
+          addCheck(
+            "leakdig windowHook flags",
+            windowHook.length || windowHook.selfTop || windowHook.selfTopLoop,
+            windowHook,
+            "medium"
+          );
+
+          const webglInfoHook = checkWebglInfoHookLikeLeakdig();
+          addCheck("leakdig webgl info hook timing", webglInfoHook.suspicious, webglInfoHook, "medium");
+
+          const nativeApiFlags = getNativeApiTamperFlagsLikeLeakdig();
+          addCheck("leakdig native api tamper flags", nativeApiFlags.length > 0, { flags: nativeApiFlags }, "high");
+
+          const hookFlags = checkHookLikeLeakdig();
+          addCheck("leakdig checkHook flags", hookFlags.length > 0, { flags: hookFlags }, "high");
+
+          const descriptorHookFlags = getOwnPropertyDescriptorHookLikeLeakdig();
+          addCheck("leakdig descriptor hook flags", descriptorHookFlags.length > 0, { flags: descriptorHookFlags }, "high");
+
+          const functionStackTamper = detectionFunctionToStringTamperLikeLeakdig();
+          addCheck("leakdig function toString stack tamper", functionStackTamper.suspicious, functionStackTamper, "medium");
+
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          const support = {
+            context2D: checkSupportCanvasContext2DLikeLeakdig(),
+            fillText: checkSupportCanvasFillTextLikeLeakdig(),
+            toDataURL: checkSupportCanvasToDataURLLikeLeakdig(),
+            offscreenCanvas: checkSupportOffscreenCanvasLikeLeakdig()
+          };
+          addCheck(
+            "leakdig canvas support",
+            !support.context2D || !support.fillText || !support.toDataURL,
+            support,
+            "high"
+          );
+
+          addCheck(
+            "extension injection sanity",
+            false,
             {
-              current: { name: method.name, length: method.length },
-              clean: { name: cleanMethod.name, length: cleanMethod.length }
+              protocol: location.protocol,
+              fileProtocolWithoutCanvasFlags: location.protocol === "file:" && getApiTamperFlagsLikeLeakdig(ctx).length === 0,
+              note:
+                "file:// pages are often not covered by extension content scripts unless file access is enabled. Serve this page over http://localhost for reliable testing."
+            },
+            "info"
+          );
+
+          addCheck(
+            "context prototype",
+            Object.getPrototypeOf(ctx) !== CanvasRenderingContext2D.prototype || !(ctx instanceof CanvasRenderingContext2D),
+            {
+              prototypeMatches: Object.getPrototypeOf(ctx) === CanvasRenderingContext2D.prototype,
+              instanceofContext: ctx instanceof CanvasRenderingContext2D
+            },
+            "high"
+          );
+
+          const instanceMismatches = [];
+          for (const methodName of methodNames) {
+            if (methodName === "getContext" || methodName === "toDataURL" || methodName === "toBlob") continue;
+            if (typeof ctx[methodName] !== "function") continue;
+            if (ctx[methodName] !== CanvasRenderingContext2D.prototype[methodName]) {
+              instanceMismatches.push(methodName);
+            }
+            if (ctx[methodName] !== ctx[methodName]) {
+              instanceMismatches.push(methodName + ":unstable-reference");
+            }
+          }
+          addCheck("context method reference", instanceMismatches.length > 0, { mismatches: instanceMismatches }, "high");
+
+          const apiTamperFlags = getApiTamperFlagsLikeLeakdig(ctx);
+          addCheck("leakdig-like api tamper flags", apiTamperFlags.length > 0, { flags: apiTamperFlags }, "high");
+
+          const proxyFlags = getProxyHookLikeLeakdig(ctx);
+          addCheck("leakdig-like proxy hook flags", proxyFlags.length > 0, { flags: proxyFlags }, "high");
+
+          const fullProxyFlags = getFullProxyHookLikeLeakdig(ctx);
+          addCheck("leakdig full proxyHook flags", fullProxyFlags.length > 0, { flags: fullProxyFlags }, "high");
+
+          const ownContextMethods = Object.getOwnPropertyNames(ctx).filter(
+            (key) => methodNames.includes(key) || typeof ctx[key] === "function"
+          );
+          addCheck("context own methods", ownContextMethods.length > 0, { ownContextMethods }, "medium");
+
+          const probe = document.createElement("canvas");
+          const probeCtx = renderSemanticCanvas(probe);
+          const dataUrlA = probe.toDataURL();
+          const dataUrlB = probe.toDataURL();
+          const imageDataA = probeCtx.getImageData(0, 0, probe.width, probe.height);
+          const imageDataB = probeCtx.getImageData(0, 0, probe.width, probe.height);
+          addCheck(
+            "canvas read stability",
+            dataUrlA !== dataUrlB || hashBytes(imageDataA.data) !== hashBytes(imageDataB.data),
+            {
+              dataUrlA: hashString(dataUrlA),
+              dataUrlB: hashString(dataUrlB),
+              imageDataA: hashBytes(imageDataA.data),
+              imageDataB: hashBytes(imageDataB.data)
+            },
+            "high"
+          );
+
+          const gradientRing = getGradientRingReport();
+          addCheck(
+            "canvas ring pseudo-gradient vs true-gradient",
+            !gradientRing.pseudo.stable || !gradientRing.real.stable || !gradientRing.pseudoAndRealDiffer,
+            gradientRing,
+            "high"
+          );
+
+          const singlePixel = getSinglePixelReport();
+          addCheck(
+            "canvas single-pixel exact readback",
+            !singlePixel.blankExact ||
+              !singlePixel.fillStable ||
+              !singlePixel.fillExpected ||
+              !singlePixel.putStable ||
+              !singlePixel.putExpected,
+            singlePixel,
+            "high"
+          );
+
+          const leakdigProbe = document.createElement("canvas");
+          const leakdigCtx = renderFingerprintCanvas(leakdigProbe);
+          const leakdigDataUrlA = leakdigProbe.toDataURL();
+          const leakdigDataUrlB = leakdigProbe.toDataURL();
+          const generatedCanvasData = generateCanvasDataLikeLeakdig();
+          addCheck(
+            "leakdig 260x30 fingerprint stability",
+            leakdigDataUrlA !== leakdigDataUrlB || !generatedCanvasData.dataURL,
+            {
+              dataUrlA: hashString(leakdigDataUrlA),
+              dataUrlB: hashString(leakdigDataUrlB),
+              generatedDataUrl: hashString(generatedCanvasData.dataURL || ""),
+              pixelChecksum: getPixelChecksumLikeLeakdig(leakdigCtx),
+              colorCount240x30: countColorsOptimizedLikeLeakdig(leakdigCtx)
+            },
+            "high"
+          );
+
+          addCheck(
+            "leakdig toDataURL native check",
+            !isNativeFunction(document.createElement("canvas").toDataURL),
+            { sourceHash: hashString(Function.prototype.toString.call(document.createElement("canvas").toDataURL)) },
+            "high"
+          );
+
+          const dataUrlRendering = await checkDataUrlRenderingLikeLeakdig();
+          addCheck("leakdig dataURL rendering check", !dataUrlRendering.ok && !dataUrlRendering.unsupported, dataUrlRendering, "high");
+
+          const base64Equal = await checkBase64EqualLikeLeakdig();
+          addCheck("leakdig fixed base64 render/export stability", !base64Equal.stable && !base64Equal.unsupported, base64Equal, "high");
+
+          const drawImageLikeLeakdig = await isDrawImagePixelConsistentLikeLeakdig();
+          addCheck("leakdig drawImage dataURL pixel consistency", !drawImageLikeLeakdig.ok, drawImageLikeLeakdig, "high");
+
+          const simpleCanvas = getSimpleCanvasDataLikeLeakdig();
+          addCheck(
+            "leakdig simple canvas availability",
+            !simpleCanvas || simpleCanvas === "-",
+            { hash: hashString(simpleCanvas || ""), length: simpleCanvas ? simpleCanvas.length : 0 },
+            "medium"
+          );
+
+          const complex = getComplexCanvasDataLikeLeakdig();
+          const complexHistogram = getHistogramBins(complex.pixelData);
+          addCheck(
+            "leakdig complex canvas statistics",
+            !complex.base64 || !complex.valueBase64 || complex.pixelData.length === 0,
+            {
+              base64Hash: hashString(complex.base64 || ""),
+              valueBase64Hash: hashString(complex.valueBase64 || ""),
+              evenodd: complex.evenodd,
+              pixelHash: hashBytes(complex.pixelData),
+              histogramHash: hashString(complexHistogram.join(",")),
+              colorCount: countColors(complex.pixelData)
             },
             "medium"
           );
 
-          const descriptor = Object.getOwnPropertyDescriptor(owner, methodName);
-          const cleanDescriptor = Object.getOwnPropertyDescriptor(cleanOwner, methodName);
-          addCheck(
-            methodName + " descriptor",
-            !sameDescriptorShape(descriptor, cleanDescriptor),
-            {
-              current: stringifyDescriptor(descriptor),
-              clean: stringifyDescriptor(cleanDescriptor)
-            },
-            "medium"
-          );
+          const blinkNoise = await getBlinkCanvasNoiseLikeLeakdig();
+          addCheck("leakdig blink canvas noise map", !blinkNoise.ok && !blinkNoise.skipped, blinkNoise, "high");
 
-          const ownNames = Object.getOwnPropertyNames(method).filter(
-            (key) => !["length", "name"].includes(key)
-          );
-          const cleanOwnNames = Object.getOwnPropertyNames(cleanMethod).filter(
-            (key) => !["length", "name"].includes(key)
-          );
-          addCheck(
-            methodName + " own properties",
-            ownNames.join("|") !== cleanOwnNames.join("|"),
-            { current: ownNames, clean: cleanOwnNames },
-            "medium"
-          );
+          const blank = document.createElement("canvas");
+          blank.width = 8;
+          blank.height = 8;
+          const blankData = blank.getContext("2d").getImageData(0, 0, 8, 8).data;
+          const blankChanged = Array.from(blankData).some((value, index) => {
+            return index % 4 === 3 ? value !== 0 : value !== 0;
+          });
+          addCheck("blank canvas unchanged", blankChanged, { hash: hashBytes(blankData), colors: countColors(blankData) }, "high");
+
+          const solid = document.createElement("canvas");
+          solid.width = 32;
+          solid.height = 32;
+          const solidCtx = solid.getContext("2d");
+          solidCtx.fillStyle = "#224466";
+          solidCtx.fillRect(0, 0, 32, 32);
+          const solidData = solidCtx.getImageData(0, 0, 32, 32).data;
+          addCheck("solid color low entropy", countColors(solidData) !== 1, { colors: countColors(solidData), hash: hashBytes(solidData) }, "medium");
+
+          const imageResult = drawImageConsistency();
+          addCheck("drawImage pixel consistency", !imageResult.stable, imageResult, "high");
+        } catch (error) {
+          addCheck("runner exception", true, { message: error && error.message, stack: error && error.stack }, "high");
+        } finally {
+          clean.dispose();
+          renderResults();
         }
+      };
 
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        addCheck(
-          "context prototype",
-          Object.getPrototypeOf(ctx) !== CanvasRenderingContext2D.prototype ||
-            !(ctx instanceof CanvasRenderingContext2D),
-          {
-            prototypeMatches: Object.getPrototypeOf(ctx) === CanvasRenderingContext2D.prototype,
-            instanceofContext: ctx instanceof CanvasRenderingContext2D
-          },
-          "high"
-        );
-
-        const instanceMismatches = [];
-        for (const methodName of methodNames) {
-          if (methodName === "getContext" || methodName === "toDataURL" || methodName === "toBlob") {
-            continue;
-          }
-          if (typeof ctx[methodName] !== "function") continue;
-          if (ctx[methodName] !== CanvasRenderingContext2D.prototype[methodName]) {
-            instanceMismatches.push(methodName);
-          }
-          if (ctx[methodName] !== ctx[methodName]) {
-            instanceMismatches.push(methodName + ":unstable-reference");
-          }
-        }
-        addCheck(
-          "context method reference",
-          instanceMismatches.length > 0,
-          { mismatches: instanceMismatches },
-          "high"
-        );
-
-        const ownContextMethods = Object.getOwnPropertyNames(ctx).filter(
-          (key) => methodNames.includes(key) || typeof ctx[key] === "function"
-        );
-        addCheck(
-          "context own methods",
-          ownContextMethods.length > 0,
-          { ownContextMethods },
-          "medium"
-        );
-
-        const probe = document.createElement("canvas");
-        const probeCtx = renderFingerprintCanvas(probe);
-        const dataUrlA = probe.toDataURL();
-        const dataUrlB = probe.toDataURL();
-        const imageDataA = probeCtx.getImageData(0, 0, probe.width, probe.height);
-        const imageDataB = probeCtx.getImageData(0, 0, probe.width, probe.height);
-        addCheck(
-          "canvas read stability",
-          dataUrlA !== dataUrlB || hashBytes(imageDataA.data) !== hashBytes(imageDataB.data),
-          {
-            dataUrlA: hashString(dataUrlA),
-            dataUrlB: hashString(dataUrlB),
-            imageDataA: hashBytes(imageDataA.data),
-            imageDataB: hashBytes(imageDataB.data)
-          },
-          "high"
-        );
-
-        const blank = document.createElement("canvas");
-        blank.width = 8;
-        blank.height = 8;
-        const blankData = blank.getContext("2d").getImageData(0, 0, 8, 8).data;
-        const blankChanged = Array.from(blankData).some((value, index) => {
-          return index % 4 === 3 ? value !== 0 : value !== 0;
-        });
-        addCheck(
-          "blank canvas unchanged",
-          blankChanged,
-          { hash: hashBytes(blankData), colors: countColors(blankData) },
-          "high"
-        );
-
-        const solid = document.createElement("canvas");
-        solid.width = 32;
-        solid.height = 32;
-        const solidCtx = solid.getContext("2d");
-        solidCtx.fillStyle = "#224466";
-        solidCtx.fillRect(0, 0, 32, 32);
-        const solidData = solidCtx.getImageData(0, 0, 32, 32).data;
-        addCheck(
-          "solid color low entropy",
-          countColors(solidData) !== 1,
-          { colors: countColors(solidData), hash: hashBytes(solidData) },
-          "medium"
-        );
-
-        const imageResult = drawImageConsistency();
-        addCheck(
-          "drawImage pixel consistency",
-          !imageResult.stable,
-          imageResult,
-          "high"
-        );
-      } catch (error) {
-        addCheck(
-          "runner exception",
-          true,
-          { message: error && error.message, stack: error && error.stack },
-          "high"
-        );
-      } finally {
-        clean.dispose();
-      }
-
-      const failed = checks.filter((check) => check.failed);
-      const summary = document.getElementById("summary");
-      summary.className = "summary " + (failed.length ? "fail" : "pass");
-      summary.textContent = failed.length
-        ? "Canvas abnormal: " + failed.length + " suspicious checks failed"
-        : "Canvas looks normal under this leakdig-style probe";
-
-      const tbody = document.getElementById("checks");
-      for (const check of checks) {
-        const tr = document.createElement("tr");
-        const name = document.createElement("td");
-        const status = document.createElement("td");
-        const details = document.createElement("td");
-        name.textContent = check.name;
-        status.textContent = check.failed ? "FAIL" : "PASS";
-        status.className = check.failed ? "fail-text" : "pass-text";
-        details.textContent = JSON.stringify(check.details, null, 2);
-        tr.append(name, status, details);
-        tbody.append(tr);
-      }
-
-      document.getElementById("raw").textContent = JSON.stringify(
-        {
-          canvasAbnormal: failed.length > 0,
-          failed: failed.map((check) => check.name),
-          checks
-        },
-        null,
-        2
-      );
+      run();
     </script>
   </body>
 </html>
