@@ -6,9 +6,19 @@
     <script>
       (function snapshotNativeSurface() {
         function getFromPath(path, root) {
-          return path.split(".").reduce(function (value, key) {
-            return value == null ? undefined : value[key];
-          }, root || window);
+          var parts = path.split(".");
+          var value = root || window;
+          for (var index = 0; index < parts.length; index++) {
+            if (value == null) return undefined;
+            var key = parts[index];
+            var descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (descriptor) {
+              value = "value" in descriptor ? descriptor.value : descriptor.get || descriptor.set;
+            } else {
+              value = value[key];
+            }
+          }
+          return value;
         }
 
         var paths = [
@@ -195,7 +205,17 @@
       };
 
       const getFromPath = (path, root = window) => {
-        return path.split(".").reduce((value, key) => (value == null ? undefined : value[key]), root);
+        let value = root;
+        for (const key of path.split(".")) {
+          if (value == null) return undefined;
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          if (descriptor) {
+            value = "value" in descriptor ? descriptor.value : descriptor.get || descriptor.set;
+          } else {
+            value = value[key];
+          }
+        }
+        return value;
       };
 
       const stringifyDescriptor = (descriptor) => {

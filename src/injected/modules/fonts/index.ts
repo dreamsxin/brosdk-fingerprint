@@ -1,5 +1,6 @@
 import { record } from "../../core/record";
 import { nativeProxy } from "../../core/stealth";
+import { getRawCanvas2DContext } from "../canvas2d";
 
 export const installFontDetection = () => {
   const rawMeasureText = CanvasRenderingContext2D.prototype.measureText;
@@ -7,7 +8,7 @@ export const installFontDetection = () => {
     CanvasRenderingContext2D.prototype.measureText = nativeProxy(rawMeasureText, {
       apply(target, thisArg, args: [string]) {
         record("fonts.measureText", "low");
-        return Reflect.apply(target, thisArg, args);
+        return Reflect.apply(target, getRawCanvas2DContext(thisArg) ?? thisArg, args);
       }
     }) as typeof rawMeasureText;
   }

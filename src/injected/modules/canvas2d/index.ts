@@ -13,6 +13,7 @@ const profiles = new WeakMap<CanvasLike, Canvas2DProfile>();
 const rawContextProfiles = new WeakMap<Canvas2DContext, Canvas2DProfile>();
 const proxyContextProfiles = new WeakMap<object, Canvas2DProfile>();
 const contextProxies = new WeakMap<Canvas2DContext, Canvas2DContext>();
+const proxyToRawContexts = new WeakMap<object, Canvas2DContext>();
 const wrapperCache = new WeakMap<Canvas2DContext, Map<PropertyKey, Function>>();
 const riskyStyles = new WeakSet<object>();
 
@@ -37,6 +38,11 @@ const getProfileForContext = (ctx: Canvas2DContext): Canvas2DProfile => {
     rawContextProfiles.set(ctx, profile);
   }
   return profile;
+};
+
+export const getRawCanvas2DContext = (ctx: unknown): Canvas2DContext | undefined => {
+  if (!ctx || (typeof ctx !== "object" && typeof ctx !== "function")) return undefined;
+  return proxyToRawContexts.get(ctx as object);
 };
 
 const isPureColor = (value: unknown): boolean => typeof value === "string";
@@ -298,6 +304,7 @@ const createProtectedContext = (ctx: CanvasRenderingContext2D, config: Extension
   });
 
   proxyContextProfiles.set(proxy, profile);
+  proxyToRawContexts.set(proxy, ctx);
   contextProxies.set(ctx, proxy as Canvas2DContext);
   return proxy as CanvasRenderingContext2D;
 };
